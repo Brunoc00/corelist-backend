@@ -3,7 +3,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .serializers import RegisterSerializer
+from .serializers import RegisterSerializer, UserSerializer
 
 
 class RegisterView(APIView):
@@ -29,3 +29,9 @@ class RegisterView(APIView):
             serializer.errors,
             status=status.HTTP_400_BAD_REQUEST,
         )
+class MeView(APIView):
+
+    def get(self, request):
+        serializer = UserSerializer(request.user)
+
+        return Response(serializer.data)
