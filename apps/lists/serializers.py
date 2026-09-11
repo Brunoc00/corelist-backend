@@ -28,6 +28,7 @@ class ListItemSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             'id',
+            'list',
             'created_at',
             'updated_at',
         ]

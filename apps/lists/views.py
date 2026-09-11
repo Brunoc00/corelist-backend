@@ -1,3 +1,5 @@
+from django.shortcuts import get_object_or_404
+
 from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated
 
@@ -35,9 +37,21 @@ class ListItemListCreateView(generics.ListCreateAPIView):
         )
 
     def perform_create(self, serializer):
-        shopping_list = List.objects.get(
+        shopping_list = get_object_or_404(
+            List,
             id=self.kwargs['list_id'],
             owner=self.request.user,
         )
 
         serializer.save(list=shopping_list)
+
+
+class ListItemDetailView(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = ListItemSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return ListItem.objects.filter(
+            list__owner=self.request.user,
+            list_id=self.kwargs['list_id'],
+        )
