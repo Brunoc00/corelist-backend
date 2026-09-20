@@ -17,6 +17,10 @@ class Product(models.Model):
         null=True,
         blank=True,
     )
+    unit = models.CharField(
+        max_length=50,
+        blank=True,
+    )
     category = models.ForeignKey(
         Category,
         on_delete=models.PROTECT,

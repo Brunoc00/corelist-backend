@@ -9,6 +9,7 @@ class ListSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'name',
+            'budget',
             'created_at',
             'updated_at',
         ]
@@ -22,6 +23,7 @@ class ListItemSerializer(serializers.ModelSerializer):
             'list',
             'product',
             'quantity',
+            'price',
             'is_completed',
             'created_at',
             'updated_at',

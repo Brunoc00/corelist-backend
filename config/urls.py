@@ -16,6 +16,7 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import include, path
+from apps.products.views import CategoryListCreateView
 
 
 urlpatterns = [
@@ -23,4 +24,5 @@ urlpatterns = [
     path('api/auth/', include('apps.accounts.urls')),
     path('api/products/', include('apps.products.urls')),
     path('api/lists/', include('apps.lists.urls')),
+    path('api/categories/',CategoryListCreateView.as_view(),name='category-list-create',),
 ]

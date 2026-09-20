@@ -178,3 +178,69 @@ class ProductTests(TestCase):
             'category',
             response.data,
         )
+
+    def test_user_can_create_product_with_unit(self):
+        response = self.client.post(
+            '/api/products/',
+            {
+                'name': 'Arroz',
+                'description': 'Arroz branco',
+                'price': 12.00,
+                'unit': '5 kg',
+                'category': self.category.id,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['name'], 'Arroz')
+        self.assertEqual(response.data['unit'], '5 kg')
+
+    def test_user_can_list_categories(self):
+        response = self.client.get(
+            '/api/categories/'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(
+            response.data[0]['name'],
+            'Alimentos',
+        )
+
+    def test_user_can_create_category(self):
+        response = self.client.post(
+            '/api/categories/',
+            {
+                'name': 'Bebidas',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            response.data['name'],
+            'Bebidas',
+        )
+
+    def test_unauthenticated_user_cannot_list_categories(self):
+        self.client.force_authenticate(user=None)
+
+        response = self.client.get(
+            '/api/categories/'
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_unauthenticated_user_cannot_create_category(self):
+        self.client.force_authenticate(user=None)
+
+        response = self.client.post(
+            '/api/categories/',
+            {
+                'name': 'Bebidas',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 401)

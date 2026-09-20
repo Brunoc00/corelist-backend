@@ -11,6 +11,12 @@ class List(models.Model):
         related_name='lists',
     )
     name = models.CharField(max_length=200)
+    budget = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -33,6 +39,12 @@ class ListItem(models.Model):
         max_digits=10,
         decimal_places=2,
         default=1,
+    )
+    price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
     )
     is_completed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)

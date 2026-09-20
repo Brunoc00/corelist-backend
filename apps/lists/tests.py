@@ -40,6 +40,26 @@ class ListItemTests(TestCase):
             quantity=2,
         )
 
+    def test_user_can_create_list_with_budget(self):
+        response = self.client.post(
+            '/api/lists/',
+            {
+                'name': 'Compras do mês',
+                'budget': '200.00',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            response.data['name'],
+            'Compras do mês',
+        )
+        self.assertEqual(
+            response.data['budget'],
+            '200.00',
+        )
+
     def test_user_can_list_items(self):
         response = self.client.get(
             f'/api/lists/{self.shopping_list.id}/items/'
@@ -163,4 +183,29 @@ class ListItemTests(TestCase):
 
         self.assertTrue(
             ListItem.objects.filter(id=self.item.id).exists()
+        )
+
+    def test_user_can_create_item_with_price(self):
+        response = self.client.post(
+            f'/api/lists/{self.shopping_list.id}/items/',
+            {
+                'product': self.product.id,
+                'quantity': 2,
+                'price': '12.50',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            response.data['product'],
+            self.product.id,
+        )
+        self.assertEqual(
+            response.data['quantity'],
+            '2.00',
+        )
+        self.assertEqual(
+            response.data['price'],
+            '12.50',
         )
