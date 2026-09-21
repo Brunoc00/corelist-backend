@@ -8,6 +8,21 @@ class CategorySerializer(serializers.ModelSerializer):
         model = Category
         fields = ['id', 'name']
 
+    def validate_name(self, value):
+        value = value.strip()
+
+        if not value:
+            raise serializers.ValidationError(
+                'O nome da categoria é obrigatório.'
+            )
+
+        if Category.objects.filter(name__iexact=value).exists():
+            raise serializers.ValidationError(
+                'Esta categoria já existe.'
+            )
+
+        return value
+
 
 class ProductSerializer(serializers.ModelSerializer):
     class Meta:

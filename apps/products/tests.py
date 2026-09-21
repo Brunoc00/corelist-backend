@@ -244,3 +244,15 @@ class ProductTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 401)
+
+    def test_user_cannot_create_duplicate_category(self):
+        response = self.client.post(
+            '/api/categories/',
+            {
+                'name': 'alimentos',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('name', response.data)
