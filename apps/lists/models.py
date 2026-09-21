@@ -50,5 +50,12 @@ class ListItem(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    @property
+    def subtotal(self):
+        if self.price is None:
+            return None
+
+        return self.quantity * self.price
+
     def __str__(self):
         return f'{self.product.name} - {self.list.name}'

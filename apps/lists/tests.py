@@ -209,3 +209,18 @@ class ListItemTests(TestCase):
             response.data['price'],
             '12.50',
         )
+        self.assertEqual(
+            response.data['subtotal'],
+            '25.00',
+        )
+
+    def test_list_item_calculates_subtotal(self):
+        self.item.price = '30.00'
+        self.item.save()
+
+        self.item.refresh_from_db()
+
+        self.assertEqual(
+            self.item.subtotal,
+            60,
+        )

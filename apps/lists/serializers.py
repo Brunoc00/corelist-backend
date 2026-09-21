@@ -16,6 +16,12 @@ class ListSerializer(serializers.ModelSerializer):
 
 
 class ListItemSerializer(serializers.ModelSerializer):
+    subtotal = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        read_only=True,
+    )
+
     class Meta:
         model = ListItem
         fields = [
@@ -24,6 +30,7 @@ class ListItemSerializer(serializers.ModelSerializer):
             'product',
             'quantity',
             'price',
+            'subtotal',
             'is_completed',
             'created_at',
             'updated_at',
