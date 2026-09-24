@@ -3,18 +3,6 @@ from rest_framework import serializers
 from .models import List, ListItem
 
 
-class ListSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = List
-        fields = [
-            'id',
-            'name',
-            'budget',
-            'created_at',
-            'updated_at',
-        ]
-
-
 class ListItemSerializer(serializers.ModelSerializer):
     subtotal = serializers.DecimalField(
         max_digits=10,
@@ -56,3 +44,30 @@ class ListItemSerializer(serializers.ModelSerializer):
             )
 
         return value
+
+
+class ListSerializer(serializers.ModelSerializer):
+    items = ListItemSerializer(
+        many=True,
+        read_only=True,
+    )
+
+    total = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        read_only=True,
+    )
+
+    class Meta:
+        model = List
+        fields = [
+            'id',
+            'name',
+            'budget',
+            'is_completed',
+            'completed_at',
+            'items',
+            'total',
+            'created_at',
+            'updated_at',
+        ]

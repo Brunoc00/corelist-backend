@@ -224,3 +224,131 @@ class ListItemTests(TestCase):
             self.item.subtotal,
             60,
         )
+
+    def test_user_can_complete_list(self):
+        response = self.client.post(
+            f'/api/lists/{self.shopping_list.id}/complete/'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['is_completed'])
+        self.assertIsNotNone(response.data['completed_at'])
+
+        self.shopping_list.refresh_from_db()
+
+        self.assertTrue(self.shopping_list.is_completed)
+        self.assertIsNotNone(self.shopping_list.completed_at)
+
+    def test_user_cannot_complete_another_users_list(self):
+        self.client.force_authenticate(user=self.other_user)
+
+        response = self.client.post(
+            f'/api/lists/{self.shopping_list.id}/complete/'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+        self.shopping_list.refresh_from_db()
+
+        self.assertFalse(self.shopping_list.is_completed)
+        self.assertIsNone(self.shopping_list.completed_at)
+
+    def test_user_can_list_completed_lists(self):
+        self.shopping_list.is_completed = True
+        self.shopping_list.save()
+
+        response = self.client.get(
+            '/api/lists/history/'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(
+            response.data[0]['id'],
+            self.shopping_list.id,
+        )
+        self.assertTrue(
+            response.data[0]['is_completed']
+        )
+
+    def test_history_does_not_include_active_lists(self):
+        response = self.client.get(
+            '/api/lists/history/'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+    def test_user_cannot_see_another_users_completed_list_history(self):
+        other_list = List.objects.create(
+            name='Lista do outro usuário',
+            owner=self.other_user,
+            is_completed=True,
+        )
+
+        response = self.client.get(
+            '/api/lists/history/'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+    def test_history_includes_list_items(self):
+        self.item.price = '30.00'
+        self.item.save()
+
+        self.shopping_list.is_completed = True
+        self.shopping_list.save()
+
+        response = self.client.get(
+            '/api/lists/history/'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+
+        history_list = response.data[0]
+
+        self.assertEqual(
+            len(history_list['items']),
+            1,
+        )
+
+        self.assertEqual(
+            history_list['items'][0]['product'],
+            self.product.id,
+        )
+
+        self.assertEqual(
+            history_list['items'][0]['quantity'],
+            '2.00',
+        )
+
+        self.assertEqual(
+            history_list['items'][0]['price'],
+            '30.00',
+        )
+
+        self.assertEqual(
+            history_list['items'][0]['subtotal'],
+            '60.00',
+        )
+
+    def test_history_returns_list_total(self):
+        self.item.price = '30.00'
+        self.item.save()
+
+        self.shopping_list.is_completed = True
+        self.shopping_list.save()
+
+        response = self.client.get(
+            '/api/lists/history/'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+
+        self.assertEqual(
+            response.data[0]['total'],
+            '60.00',
+        )

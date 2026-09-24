@@ -17,8 +17,23 @@ class List(models.Model):
         null=True,
         blank=True,
     )
+    is_completed = models.BooleanField(default=False)
+    completed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def total(self):
+        total = 0
+
+        for item in self.items.all():
+            if item.subtotal is not None:
+                total += item.subtotal
+
+        return total
 
     def __str__(self):
         return self.name
