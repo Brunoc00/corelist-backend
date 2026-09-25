@@ -691,3 +691,96 @@ class ListItemTests(TestCase):
                 'percentage_change': '-20.00',
             },
         )
+
+    def test_active_list_returns_current_total(self):
+        self.item.quantity = 2
+        self.item.price = 30
+        self.item.save()
+
+        second_product = Product.objects.create(
+            name='Feijão',
+        )
+
+        ListItem.objects.create(
+            list=self.shopping_list,
+            product=second_product,
+            quantity=3,
+            price=10,
+        )
+
+        response = self.client.get(
+            f'/api/lists/{self.shopping_list.id}/'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data['total'],
+            '90.00',
+        )
+
+    def test_active_list_returns_budget(self):
+        self.shopping_list.budget = '200.00'
+        self.shopping_list.save()
+
+        response = self.client.get(
+            f'/api/lists/{self.shopping_list.id}/'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data['budget'],
+            '200.00',
+        )
+
+    def test_active_list_returns_comparison_with_history(self):
+        self.item.quantity = 2
+        self.item.price = 60
+        self.item.save()
+
+        first_completed_list = List.objects.create(
+            name='Compra anterior 1',
+            owner=self.user,
+            is_completed=True,
+            completed_at=timezone.make_aware(
+                datetime(2026, 8, 10, 12, 0)
+            ),
+        )
+
+        ListItem.objects.create(
+            list=first_completed_list,
+            product=self.product,
+            quantity=2,
+            price=50,
+        )
+
+        second_completed_list = List.objects.create(
+            name='Compra anterior 2',
+            owner=self.user,
+            is_completed=True,
+            completed_at=timezone.make_aware(
+                datetime(2026, 9, 10, 12, 0)
+            ),
+        )
+
+        ListItem.objects.create(
+            list=second_completed_list,
+            product=self.product,
+            quantity=2,
+            price=100,
+        )
+
+        response = self.client.get(
+            f'/api/lists/{self.shopping_list.id}/'
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        self.assertEqual(
+            response.data['history_comparison'],
+            {
+                'current_total': '120.00',
+                'historical_average': '150.00',
+                'difference': '-30.00',
+                'percentage_change': '-20.00',
+            },
+        )
