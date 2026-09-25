@@ -3,7 +3,8 @@ from django.urls import path
 from .views import (ListDetailView, ListListCreateView, ListItemListCreateView,
                     ListItemDetailView,
                     ListCompleteView,
-                    ListHistoryView)
+                    ListHistoryView,
+                    ListSummaryView)
 
 
 urlpatterns = [
@@ -13,5 +14,6 @@ urlpatterns = [
     path('<int:list_id>/items/<int:pk>/', ListItemDetailView.as_view(), name='list-item-detail', ),
     path('<int:pk>/complete/',ListCompleteView.as_view(),name='list-complete',),
     path('history/',ListHistoryView.as_view(),name='list-history',),
+    path('summary/',ListSummaryView.as_view(),name='list-summary',),
 
 ]

@@ -1,3 +1,7 @@
+from decimal import Decimal
+
+from django.db.models import F, Sum
+from django.db.models.functions import Coalesce, TruncMonth
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
@@ -7,7 +11,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import List, ListItem
-from .serializers import ListItemSerializer, ListSerializer
+from .serializers import (
+    ListItemSerializer,
+    ListSerializer,
+    ListSummarySerializer,
+)
 
 
 class ListListCreateView(generics.ListCreateAPIView):
@@ -26,7 +34,10 @@ class ListDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return List.objects.filter(owner=self.request.user)
+        return List.objects.filter(
+            owner=self.request.user,
+            is_completed=False,
+        )
 
 
 class ListCompleteView(APIView):
@@ -83,6 +94,7 @@ class ListItemListCreateView(generics.ListCreateAPIView):
             List,
             id=self.kwargs['list_id'],
             owner=self.request.user,
+            is_completed=False,
         )
 
         serializer.save(list=shopping_list)
@@ -96,6 +108,7 @@ class ListItemDetailView(generics.RetrieveUpdateDestroyAPIView):
         return ListItem.objects.filter(
             list__owner=self.request.user,
             list_id=self.kwargs['list_id'],
+            list__is_completed=False,
         )
 
 
@@ -107,4 +120,76 @@ class ListHistoryView(generics.ListAPIView):
         return List.objects.filter(
             owner=self.request.user,
             is_completed=True,
+        )
+
+
+class ListSummaryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        completed_items = ListItem.objects.filter(
+            list__owner=request.user,
+            list__is_completed=True,
+        )
+
+        total_spent = completed_items.aggregate(
+            total=Coalesce(
+                Sum(
+                    F('quantity') * F('price')
+                ),
+                Decimal('0.00'),
+            )
+        )
+
+        lists_count = List.objects.filter(
+            owner=request.user,
+            is_completed=True,
+        ).count()
+
+        if lists_count > 0:
+            average_purchase = (
+                    total_spent['total'] / lists_count
+            )
+        else:
+            average_purchase = Decimal('0.00')
+
+        monthly_query = (
+            completed_items
+            .filter(
+                list__completed_at__isnull=False,
+            )
+            .annotate(
+                month=TruncMonth(
+                    'list__completed_at'
+                )
+            )
+            .values('month')
+            .annotate(
+                total=Sum(
+                    F('quantity') * F('price')
+                )
+            )
+            .order_by('month')
+        )
+
+        monthly = [
+            {
+                'month': item['month'].strftime('%Y-%m'),
+                'total': item['total'],
+            }
+            for item in monthly_query
+        ]
+
+        summary = {
+            'total': total_spent['total'],
+            'lists_count': lists_count,
+            'average_purchase': average_purchase,
+            'monthly': monthly,
+        }
+
+        serializer = ListSummarySerializer(summary)
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
         )

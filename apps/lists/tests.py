@@ -1,5 +1,8 @@
+from datetime import datetime
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.lists.models import List, ListItem
@@ -280,7 +283,7 @@ class ListItemTests(TestCase):
         self.assertEqual(len(response.data), 0)
 
     def test_user_cannot_see_another_users_completed_list_history(self):
-        other_list = List.objects.create(
+        List.objects.create(
             name='Lista do outro usuário',
             owner=self.other_user,
             is_completed=True,
@@ -351,4 +354,212 @@ class ListItemTests(TestCase):
         self.assertEqual(
             response.data[0]['total'],
             '60.00',
+        )
+
+    def test_summary_returns_total_spent(self):
+        self.item.price = 30
+        self.item.save()
+
+        self.shopping_list.is_completed = True
+        self.shopping_list.save()
+
+        response = self.client.get('/api/lists/summary/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['total'], '60.00')
+        self.assertEqual(response.data['lists_count'], 1)
+        self.assertEqual(response.data['average_purchase'], '60.00')
+
+    def test_summary_returns_zero_when_there_are_no_completed_lists(self):
+        response = self.client.get('/api/lists/summary/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['total'], '0.00')
+        self.assertEqual(response.data['lists_count'], 0)
+        self.assertEqual(response.data['average_purchase'], '0.00')
+
+    def test_summary_calculates_average_purchase(self):
+        self.item.price = 30
+        self.item.save()
+
+        self.shopping_list.is_completed = True
+        self.shopping_list.save()
+
+        second_list = List.objects.create(
+            name='Segunda compra',
+            owner=self.user,
+            is_completed=True,
+        )
+
+        ListItem.objects.create(
+            list=second_list,
+            product=self.product,
+            quantity=2,
+            price=20,
+        )
+
+        response = self.client.get('/api/lists/summary/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['total'], '100.00')
+        self.assertEqual(response.data['lists_count'], 2)
+        self.assertEqual(response.data['average_purchase'], '50.00')
+
+    def test_summary_returns_monthly_spending(self):
+        self.item.price = 30
+        self.item.save()
+
+        self.shopping_list.is_completed = True
+        self.shopping_list.completed_at = timezone.make_aware(
+            datetime(2026, 8, 15, 12, 0)
+        )
+        self.shopping_list.save()
+
+        second_list = List.objects.create(
+            name='Compra de setembro',
+            owner=self.user,
+            is_completed=True,
+            completed_at=timezone.make_aware(
+                datetime(2026, 9, 15, 12, 0)
+            ),
+        )
+
+        ListItem.objects.create(
+            list=second_list,
+            product=self.product,
+            quantity=2,
+            price=20,
+        )
+
+        response = self.client.get('/api/lists/summary/')
+
+        self.assertEqual(response.status_code, 200)
+
+        self.assertEqual(
+            response.data['monthly'],
+            [
+                {
+                    'month': '2026-08',
+                    'total': '60.00',
+                },
+                {
+                    'month': '2026-09',
+                    'total': '40.00',
+                },
+            ],
+        )
+
+    def test_user_cannot_complete_list_using_patch(self):
+        response = self.client.patch(
+            f'/api/lists/{self.shopping_list.id}/',
+            {
+                'is_completed': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        self.shopping_list.refresh_from_db()
+
+        self.assertFalse(self.shopping_list.is_completed)
+        self.assertIsNone(self.shopping_list.completed_at)
+
+    def test_user_cannot_update_item_from_completed_list(self):
+        self.item.price = '30.00'
+        self.item.save()
+
+        self.shopping_list.is_completed = True
+        self.shopping_list.save()
+
+        response = self.client.patch(
+            f'/api/lists/{self.shopping_list.id}/items/{self.item.id}/',
+            {
+                'price': '10.00',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+        self.item.refresh_from_db()
+
+        self.assertEqual(
+            self.item.price,
+            30,
+        )
+
+    def test_user_cannot_delete_item_from_completed_list(self):
+        self.shopping_list.is_completed = True
+        self.shopping_list.save()
+
+        response = self.client.delete(
+            f'/api/lists/{self.shopping_list.id}/items/{self.item.id}/'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+        self.assertTrue(
+            ListItem.objects.filter(id=self.item.id).exists()
+        )
+
+    def test_user_cannot_create_item_in_completed_list(self):
+        self.shopping_list.is_completed = True
+        self.shopping_list.save()
+
+        response = self.client.post(
+            f'/api/lists/{self.shopping_list.id}/items/',
+            {
+                'product': self.product.id,
+                'quantity': 3,
+                'price': '10.00',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+        self.assertEqual(
+            ListItem.objects.filter(
+                list=self.shopping_list,
+            ).count(),
+            1,
+        )
+
+    def test_user_cannot_update_completed_list(self):
+        self.shopping_list.is_completed = True
+        self.shopping_list.save()
+
+        response = self.client.patch(
+            f'/api/lists/{self.shopping_list.id}/',
+            {
+                'name': 'Nome alterado',
+                'budget': '999.00',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+        self.shopping_list.refresh_from_db()
+
+        self.assertEqual(
+            self.shopping_list.name,
+            'Lista de teste',
+        )
+
+    def test_user_cannot_delete_completed_list(self):
+        self.shopping_list.is_completed = True
+        self.shopping_list.save()
+
+        response = self.client.delete(
+            f'/api/lists/{self.shopping_list.id}/'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+        self.assertTrue(
+            List.objects.filter(
+                id=self.shopping_list.id,
+            ).exists()
         )

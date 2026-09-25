@@ -71,3 +71,37 @@ class ListSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         ]
+        read_only_fields = [
+            'id',
+            'is_completed',
+            'completed_at',
+            'created_at',
+            'updated_at',
+        ]
+
+
+class MonthlySummarySerializer(serializers.Serializer):
+    month = serializers.CharField()
+
+    total = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+    )
+
+
+class ListSummarySerializer(serializers.Serializer):
+    total = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+    )
+
+    lists_count = serializers.IntegerField()
+
+    average_purchase = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+    )
+
+    monthly = MonthlySummarySerializer(
+        many=True,
+    )
