@@ -89,6 +89,15 @@ class MonthlySummarySerializer(serializers.Serializer):
     )
 
 
+class CategorySummarySerializer(serializers.Serializer):
+    category = serializers.CharField()
+
+    total = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+    )
+
+
 class ListSummarySerializer(serializers.Serializer):
     total = serializers.DecimalField(
         max_digits=12,
@@ -103,5 +112,9 @@ class ListSummarySerializer(serializers.Serializer):
     )
 
     monthly = MonthlySummarySerializer(
+        many=True,
+    )
+
+    categories = CategorySummarySerializer(
         many=True,
     )

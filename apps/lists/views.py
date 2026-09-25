@@ -180,11 +180,38 @@ class ListSummaryView(APIView):
             for item in monthly_query
         ]
 
+        categories_query = (
+            completed_items
+            .filter(
+                product__category__isnull=False,
+            )
+            .values(
+                'product__category__name',
+            )
+            .annotate(
+                total=Sum(
+                    F('quantity') * F('price')
+                )
+            )
+            .order_by(
+                'product__category__name',
+            )
+        )
+
+        categories = [
+            {
+                'category': item['product__category__name'],
+                'total': item['total'],
+            }
+            for item in categories_query
+        ]
+
         summary = {
             'total': total_spent['total'],
             'lists_count': lists_count,
             'average_purchase': average_purchase,
             'monthly': monthly,
+            'categories': categories,
         }
 
         serializer = ListSummarySerializer(summary)

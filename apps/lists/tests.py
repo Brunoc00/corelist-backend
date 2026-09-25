@@ -6,7 +6,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.lists.models import List, ListItem
-from apps.products.models import Product
+from apps.products.models import Product, Category
 
 User = get_user_model()
 
@@ -562,4 +562,52 @@ class ListItemTests(TestCase):
             List.objects.filter(
                 id=self.shopping_list.id,
             ).exists()
+        )
+
+    def test_summary_returns_spending_by_category(self):
+        food_category = Category.objects.create(
+            name='Alimentos',
+        )
+
+        cleaning_category = Category.objects.create(
+            name='Limpeza',
+        )
+
+        self.product.category = food_category
+        self.product.save()
+
+        self.item.price = 30
+        self.item.save()
+
+        self.shopping_list.is_completed = True
+        self.shopping_list.save()
+
+        cleaning_product = Product.objects.create(
+            name='Detergente',
+            category=cleaning_category,
+        )
+
+        ListItem.objects.create(
+            list=self.shopping_list,
+            product=cleaning_product,
+            quantity=2,
+            price=10,
+        )
+
+        response = self.client.get('/api/lists/summary/')
+
+        self.assertEqual(response.status_code, 200)
+
+        self.assertEqual(
+            response.data['categories'],
+            [
+                {
+                    'category': 'Alimentos',
+                    'total': '60.00',
+                },
+                {
+                    'category': 'Limpeza',
+                    'total': '20.00',
+                },
+            ],
         )
