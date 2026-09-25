@@ -148,7 +148,7 @@ class ListSummaryView(APIView):
 
         if lists_count > 0:
             average_purchase = (
-                    total_spent['total'] / lists_count
+                total_spent['total'] / lists_count
             )
         else:
             average_purchase = Decimal('0.00')
@@ -236,14 +236,14 @@ class ListSummaryView(APIView):
             current_total = current_period['total']
 
             difference = (
-                    current_total - previous_total
+                current_total - previous_total
             )
 
             if previous_total != 0:
                 percentage_change = (
-                        difference
-                        / previous_total
-                        * Decimal('100')
+                    difference
+                    / previous_total
+                    * Decimal('100')
                 )
             else:
                 percentage_change = Decimal('0.00')
