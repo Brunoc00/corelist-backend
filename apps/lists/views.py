@@ -228,6 +228,57 @@ class ListSummaryView(APIView):
             for item in top_products_query
         ]
 
+        if len(monthly) >= 2:
+            previous_period = monthly[-2]
+            current_period = monthly[-1]
+
+            previous_total = previous_period['total']
+            current_total = current_period['total']
+
+            difference = (
+                    current_total - previous_total
+            )
+
+            if previous_total != 0:
+                percentage_change = (
+                        difference
+                        / previous_total
+                        * Decimal('100')
+                )
+            else:
+                percentage_change = Decimal('0.00')
+
+            period_comparison = {
+                'previous_month': previous_period['month'],
+                'previous_total': previous_total,
+                'current_month': current_period['month'],
+                'current_total': current_total,
+                'difference': difference,
+                'percentage_change': percentage_change,
+            }
+
+        elif len(monthly) == 1:
+            current_period = monthly[0]
+
+            period_comparison = {
+                'previous_month': '',
+                'previous_total': Decimal('0.00'),
+                'current_month': current_period['month'],
+                'current_total': current_period['total'],
+                'difference': current_period['total'],
+                'percentage_change': Decimal('0.00'),
+            }
+
+        else:
+            period_comparison = {
+                'previous_month': '',
+                'previous_total': Decimal('0.00'),
+                'current_month': '',
+                'current_total': Decimal('0.00'),
+                'difference': Decimal('0.00'),
+                'percentage_change': Decimal('0.00'),
+            }
+
         summary = {
             'total': total_spent['total'],
             'lists_count': lists_count,
@@ -235,6 +286,7 @@ class ListSummaryView(APIView):
             'monthly': monthly,
             'categories': categories,
             'top_products': top_products,
+            'period_comparison': period_comparison,
         }
 
         serializer = ListSummarySerializer(summary)

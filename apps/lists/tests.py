@@ -648,3 +648,46 @@ class ListItemTests(TestCase):
                 },
             ],
         )
+
+    def test_summary_returns_period_comparison(self):
+        self.item.quantity = 2
+        self.item.price = 50
+        self.item.save()
+
+        self.shopping_list.is_completed = True
+        self.shopping_list.completed_at = timezone.make_aware(
+            datetime(2026, 8, 15, 12, 0)
+        )
+        self.shopping_list.save()
+
+        second_list = List.objects.create(
+            name='Compra de setembro',
+            owner=self.user,
+            is_completed=True,
+            completed_at=timezone.make_aware(
+                datetime(2026, 9, 15, 12, 0)
+            ),
+        )
+
+        ListItem.objects.create(
+            list=second_list,
+            product=self.product,
+            quantity=2,
+            price=40,
+        )
+
+        response = self.client.get('/api/lists/summary/')
+
+        self.assertEqual(response.status_code, 200)
+
+        self.assertEqual(
+            response.data['period_comparison'],
+            {
+                'previous_month': '2026-08',
+                'previous_total': '100.00',
+                'current_month': '2026-09',
+                'current_total': '80.00',
+                'difference': '-20.00',
+                'percentage_change': '-20.00',
+            },
+        )

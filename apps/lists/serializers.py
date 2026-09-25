@@ -107,6 +107,32 @@ class TopProductSummarySerializer(serializers.Serializer):
     )
 
 
+class PeriodComparisonSerializer(serializers.Serializer):
+    previous_month = serializers.CharField()
+
+    previous_total = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+    )
+
+    current_month = serializers.CharField()
+
+    current_total = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+    )
+
+    difference = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+    )
+
+    percentage_change = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+    )
+
+
 class ListSummarySerializer(serializers.Serializer):
     total = serializers.DecimalField(
         max_digits=12,
@@ -131,3 +157,5 @@ class ListSummarySerializer(serializers.Serializer):
     top_products = TopProductSummarySerializer(
         many=True,
     )
+
+    period_comparison = PeriodComparisonSerializer()
