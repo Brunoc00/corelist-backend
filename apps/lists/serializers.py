@@ -98,6 +98,15 @@ class CategorySummarySerializer(serializers.Serializer):
     )
 
 
+class TopProductSummarySerializer(serializers.Serializer):
+    product = serializers.CharField()
+
+    quantity = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+    )
+
+
 class ListSummarySerializer(serializers.Serializer):
     total = serializers.DecimalField(
         max_digits=12,
@@ -116,5 +125,9 @@ class ListSummarySerializer(serializers.Serializer):
     )
 
     categories = CategorySummarySerializer(
+        many=True,
+    )
+
+    top_products = TopProductSummarySerializer(
         many=True,
     )

@@ -611,3 +611,40 @@ class ListItemTests(TestCase):
                 },
             ],
         )
+
+    def test_summary_returns_top_products(self):
+        self.item.quantity = 5
+        self.item.price = 10
+        self.item.save()
+
+        self.shopping_list.is_completed = True
+        self.shopping_list.save()
+
+        second_product = Product.objects.create(
+            name='Feijão',
+        )
+
+        ListItem.objects.create(
+            list=self.shopping_list,
+            product=second_product,
+            quantity=2,
+            price=8,
+        )
+
+        response = self.client.get('/api/lists/summary/')
+
+        self.assertEqual(response.status_code, 200)
+
+        self.assertEqual(
+            response.data['top_products'],
+            [
+                {
+                    'product': self.product.name,
+                    'quantity': '5.00',
+                },
+                {
+                    'product': 'Feijão',
+                    'quantity': '2.00',
+                },
+            ],
+        )
