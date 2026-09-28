@@ -16,6 +16,7 @@ from .serializers import (
     ListSerializer,
     ListSummarySerializer,
 )
+from .services.insights import generate_insights
 
 
 class ListListCreateView(generics.ListCreateAPIView):
@@ -100,7 +101,9 @@ class ListItemListCreateView(generics.ListCreateAPIView):
         serializer.save(list=shopping_list)
 
 
-class ListItemDetailView(generics.RetrieveUpdateDestroyAPIView):
+class ListItemDetailView(
+    generics.RetrieveUpdateDestroyAPIView
+):
     serializer_class = ListItemSerializer
     permission_classes = [IsAuthenticated]
 
@@ -148,7 +151,7 @@ class ListSummaryView(APIView):
 
         if lists_count > 0:
             average_purchase = (
-                total_spent['total'] / lists_count
+                    total_spent['total'] / lists_count
             )
         else:
             average_purchase = Decimal('0.00')
@@ -200,7 +203,9 @@ class ListSummaryView(APIView):
 
         categories = [
             {
-                'category': item['product__category__name'],
+                'category': item[
+                    'product__category__name'
+                ],
                 'total': item['total'],
             }
             for item in categories_query
@@ -236,14 +241,14 @@ class ListSummaryView(APIView):
             current_total = current_period['total']
 
             difference = (
-                current_total - previous_total
+                    current_total - previous_total
             )
 
             if previous_total != 0:
                 percentage_change = (
-                    difference
-                    / previous_total
-                    * Decimal('100')
+                        difference
+                        / previous_total
+                        * Decimal('100')
                 )
             else:
                 percentage_change = Decimal('0.00')
@@ -293,5 +298,21 @@ class ListSummaryView(APIView):
 
         return Response(
             serializer.data,
+            status=status.HTTP_200_OK,
+        )
+
+
+class ListInsightsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        insights = generate_insights(
+            user=request.user,
+        )
+
+        return Response(
+            {
+                'insights': insights,
+            },
             status=status.HTTP_200_OK,
         )
