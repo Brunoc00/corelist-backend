@@ -5,7 +5,8 @@ from .views import (ListDetailView, ListListCreateView, ListItemListCreateView,
                     ListCompleteView,
                     ListHistoryView,
                     ListSummaryView,
-                    ListInsightsView
+                    ListInsightsView,
+                    ListPromotionsView
                     )
 
 
@@ -18,5 +19,6 @@ urlpatterns = [
     path('history/',ListHistoryView.as_view(),name='list-history',),
     path('summary/',ListSummaryView.as_view(),name='list-summary',),
     path('insights/',ListInsightsView.as_view(),name='list-insights',),
+    path('promotions/',ListPromotionsView.as_view(),name='list-promotions',),
 
 ]

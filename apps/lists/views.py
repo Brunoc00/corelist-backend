@@ -4,6 +4,7 @@ from django.db.models import F, Sum
 from django.db.models.functions import Coalesce, TruncMonth
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from .services.promotions import get_promotions
 
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
@@ -313,6 +314,21 @@ class ListInsightsView(APIView):
         return Response(
             {
                 'insights': insights,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+class ListPromotionsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        promotions = get_promotions(
+            user=request.user,
+        )
+
+        return Response(
+            {
+                'promotions': promotions,
             },
             status=status.HTTP_200_OK,
         )

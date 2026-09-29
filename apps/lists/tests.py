@@ -22,6 +22,7 @@ from apps.lists.services.insights import (
     build_insights_context,
     generate_insights,
 )
+from apps.lists.services.promotions import get_promotions
 from apps.products.models import Product, Category
 
 User = get_user_model()
@@ -1629,4 +1630,118 @@ class ListItemTests(TestCase):
         self.assertEqual(
             insights,
             [],
+        )
+
+    def test_promotions_returns_product_below_historical_average(
+            self,
+    ):
+        self.item.price = Decimal('8.00')
+        self.item.save()
+
+        completed_list = List.objects.create(
+            name='Compra anterior',
+            owner=self.user,
+            is_completed=True,
+            completed_at=timezone.now(),
+        )
+
+        ListItem.objects.create(
+            list=completed_list,
+            product=self.product,
+            quantity=1,
+            price=Decimal('10.00'),
+        )
+
+        promotions = get_promotions(
+            user=self.user,
+        )
+
+        self.assertEqual(
+            promotions,
+            [
+                {
+                    'product': 'Arroz',
+                    'current_price': Decimal('8.00'),
+                    'historical_average': Decimal('10.00'),
+                    'savings': Decimal('2.00'),
+                }
+            ],
+        )
+
+    def test_promotions_does_not_return_product_at_or_above_historical_average(
+            self,
+    ):
+        self.item.price = Decimal('12.00')
+        self.item.save()
+
+        completed_list = List.objects.create(
+            name='Compra anterior',
+            owner=self.user,
+            is_completed=True,
+            completed_at=timezone.now(),
+        )
+
+        ListItem.objects.create(
+            list=completed_list,
+            product=self.product,
+            quantity=1,
+            price=Decimal('10.00'),
+        )
+
+        promotions = get_promotions(
+            user=self.user,
+        )
+
+        self.assertEqual(
+            promotions,
+            [],
+        )
+
+    def test_promotions_returns_empty_list_when_product_has_no_history(
+            self,
+    ):
+        self.item.price = Decimal('8.00')
+        self.item.save()
+
+        promotions = get_promotions(
+            user=self.user,
+        )
+
+        self.assertEqual(
+            promotions,
+            [],
+        )
+
+    @patch(
+        'apps.lists.views.get_promotions'
+    )
+    def test_user_can_get_promotions(
+            self,
+            mock_get_promotions,
+    ):
+        mock_get_promotions.return_value = [
+            {
+                'product': 'Arroz',
+                'current_price': Decimal('8.00'),
+                'historical_average': Decimal('10.00'),
+                'savings': Decimal('2.00'),
+            }
+        ]
+
+        response = self.client.get(
+            '/api/lists/promotions/'
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        self.assertEqual(
+            response.data['promotions'],
+            mock_get_promotions.return_value,
+        )
+
+        mock_get_promotions.assert_called_once_with(
+            user=self.user,
         )
