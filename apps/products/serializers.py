@@ -16,7 +16,9 @@ class CategorySerializer(serializers.ModelSerializer):
                 'O nome da categoria é obrigatório.'
             )
 
-        if Category.objects.filter(name__iexact=value).exists():
+        if Category.objects.filter(
+            name__iexact=value
+        ).exists():
             raise serializers.ValidationError(
                 'Esta categoria já existe.'
             )
@@ -37,3 +39,13 @@ class ProductSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         ]
+
+    def validate_name(self, value):
+        value = value.strip()
+
+        if not value:
+            raise serializers.ValidationError(
+                'O nome do produto é obrigatório.'
+            )
+
+        return value
