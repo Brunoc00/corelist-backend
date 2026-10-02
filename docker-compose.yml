@@ -1,27 +1,41 @@
 services:
   db:
-    image: postgres:18
+    image: postgres:17
+    container_name: corelist-postgres
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: ${DB_NAME}
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: corelist
+      POSTGRES_USER: corelist
+      POSTGRES_PASSWORD: corelist_dev_password
     volumes:
-      - postgres_data:/var/lib/postgresql
+      - corelist_postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      test: ["CMD-SHELL", "pg_isready -U corelist -d corelist"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   backend:
-    build: .
-    env_file:
-      - .env
+    image: jvxp34/corelist-backend:latest
+    container_name: corelist-backend
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
+    environment:
+      SECRET_KEY: "teste-docker"
+      DEBUG: "True"
+      ALLOWED_HOSTS: "localhost,127.0.0.1,backend"
+
+      DB_NAME: corelist
+      DB_USER: corelist
+      DB_PASSWORD: corelist_dev_password
+      DB_HOST: db
+      DB_PORT: "5432"
     ports:
       - "8000:8000"
 
 volumes:
-  postgres_data:
+  corelist_postgres_data:

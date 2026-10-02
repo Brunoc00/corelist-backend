@@ -4,7 +4,6 @@ from django.db.models import F, Sum
 from django.db.models.functions import Coalesce, TruncMonth
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .services.promotions import get_promotions
 
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
@@ -18,6 +17,7 @@ from .serializers import (
     ListSummarySerializer,
 )
 from .services.insights import generate_insights
+from .services.promotions import get_promotions
 
 
 class ListListCreateView(generics.ListCreateAPIView):
@@ -25,7 +25,9 @@ class ListListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return List.objects.filter(owner=self.request.user)
+        return List.objects.filter(
+            owner=self.request.user,
+        )
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
@@ -96,7 +98,6 @@ class ListItemListCreateView(generics.ListCreateAPIView):
             List,
             id=self.kwargs['list_id'],
             owner=self.request.user,
-            is_completed=False,
         )
 
         serializer.save(list=shopping_list)
@@ -112,7 +113,6 @@ class ListItemDetailView(
         return ListItem.objects.filter(
             list__owner=self.request.user,
             list_id=self.kwargs['list_id'],
-            list__is_completed=False,
         )
 
 
@@ -152,7 +152,7 @@ class ListSummaryView(APIView):
 
         if lists_count > 0:
             average_purchase = (
-                    total_spent['total'] / lists_count
+                total_spent['total'] / lists_count
             )
         else:
             average_purchase = Decimal('0.00')
@@ -242,14 +242,14 @@ class ListSummaryView(APIView):
             current_total = current_period['total']
 
             difference = (
-                    current_total - previous_total
+                current_total - previous_total
             )
 
             if previous_total != 0:
                 percentage_change = (
-                        difference
-                        / previous_total
-                        * Decimal('100')
+                    difference
+                    / previous_total
+                    * Decimal('100')
                 )
             else:
                 percentage_change = Decimal('0.00')
@@ -317,6 +317,7 @@ class ListInsightsView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
 
 class ListPromotionsView(APIView):
     permission_classes = [IsAuthenticated]
