@@ -44,6 +44,10 @@ def get_promotions(user):
                 'list_name': item.list.name,
                 'quantity': item.quantity,
                 'product': item.product.name,
+                'brand': item.product.brand,
+                'package_size': item.product.package_size,
+                'image_url': item.product.image_url,
+                'data_source': item.product.data_source,
                 'current_price': item.price,
                 'historical_average': historical_average,
                 'savings': (

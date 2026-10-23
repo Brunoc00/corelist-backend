@@ -4,6 +4,7 @@ from .views import (
     CategoryListCreateView,
     ProductDetailView,
     ProductListCreateView,
+    ProductLookupView,
 )
 
 
@@ -12,6 +13,11 @@ urlpatterns = [
         'categories/',
         CategoryListCreateView.as_view(),
         name='category-list-create',
+    ),
+    path(
+        'lookup/',
+        ProductLookupView.as_view(),
+        name='product-lookup',
     ),
     path(
         '',

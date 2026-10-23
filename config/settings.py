@@ -222,3 +222,11 @@ if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
+
+
+# Open Food Facts exige um User-Agent que identifique o app.
+
+OPEN_FOOD_FACTS_USER_AGENT = os.getenv(
+    'OPEN_FOOD_FACTS_USER_AGENT',
+    'CompraFacil/1.0 (+https://github.com/jvxp34/corelist-frontend-v2)',
+)
