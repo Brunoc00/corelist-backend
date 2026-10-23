@@ -35,3 +35,20 @@ class MeView(APIView):
         serializer = UserSerializer(request.user)
 
         return Response(serializer.data)
+
+    def patch(self, request):
+        # Só o nome pode mudar aqui; o e-mail é o login da conta.
+        serializer = UserSerializer(
+            request.user,
+            data={
+                key: request.data[key]
+                for key in ('first_name', 'last_name')
+                if key in request.data
+            },
+            partial=True,
+        )
+
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        return Response(serializer.data)
