@@ -32,7 +32,7 @@ def build_prompt(context):
     )
 
     return (
-        'Você é o assistente de compras do CoreList.\n'
+        'Você é o assistente de compras do CompraFácil.\n'
         '\n'
         'Analise somente os fatos fornecidos abaixo.\n'
         'Não invente valores, histórico ou informações.\n'
