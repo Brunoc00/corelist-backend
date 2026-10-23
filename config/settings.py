@@ -12,7 +12,9 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 from datetime import timedelta
+from urllib.parse import unquote, urlparse
 
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 import os
 
@@ -23,14 +25,37 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env')
 
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
+def env_bool(name, default):
+    return os.getenv(name, str(default)).strip().lower() in (
+        '1', 'true', 'yes', 'on',
+    )
 
-SECRET_KEY = 'django-insecure-!za_#wolc9y9k_0o(88c9jd(lkv^2xq=nq1cly1lyj9x354144'
 
-DEBUG = True
+def env_list(name):
+    return [
+        item.strip()
+        for item in os.getenv(name, '').split(',')
+        if item.strip()
+    ]
 
-ALLOWED_HOSTS = []
+
+# Produção: defina SECRET_KEY, DEBUG=False, ALLOWED_HOSTS e
+# CORS_ALLOWED_ORIGINS no ambiente (ver .env.example). Os valores padrão
+# abaixo servem só para desenvolvimento local.
+
+DEBUG = env_bool('DEBUG', True)
+
+SECRET_KEY = os.getenv(
+    'SECRET_KEY',
+    'django-insecure-!za_#wolc9y9k_0o(88c9jd(lkv^2xq=nq1cly1lyj9x354144',
+)
+
+if not DEBUG and SECRET_KEY.startswith('django-insecure-'):
+    raise ImproperlyConfigured(
+        'Defina SECRET_KEY no ambiente antes de rodar com DEBUG=False.'
+    )
+
+ALLOWED_HOSTS = env_list('ALLOWED_HOSTS')
 
 
 # Application definition
@@ -100,6 +125,20 @@ DATABASES = {
     }
 }
 
+# Hospedagens como Render e Railway entregam o banco numa só variável:
+# DATABASE_URL=postgres://usuario:senha@host:porta/nome
+if os.getenv('DATABASE_URL'):
+    _db = urlparse(os.environ['DATABASE_URL'])
+
+    DATABASES['default'].update({
+        'NAME': _db.path.lstrip('/'),
+        'USER': unquote(_db.username or ''),
+        'PASSWORD': unquote(_db.password or ''),
+        'HOST': _db.hostname or '',
+        'PORT': str(_db.port or 5432),
+        'CONN_MAX_AGE': 60,
+    })
+
 
 # Password validation
 
@@ -134,6 +173,8 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
 
 # Default primary key field type
 
@@ -166,5 +207,18 @@ SIMPLE_JWT = {
 
 
 # CORS
+# Em produção, só o endereço do frontend (ex.: https://comprafacil.vercel.app).
 
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOWED_ORIGINS = env_list('CORS_ALLOWED_ORIGINS')
+
+CORS_ALLOW_ALL_ORIGINS = DEBUG and not CORS_ALLOWED_ORIGINS
+
+CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS
+
+
+# Segurança em produção (HTTPS atrás do proxy da hospedagem)
+
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True

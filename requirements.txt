@@ -13,3 +13,4 @@ typing_extensions==4.16.0
 tzdata==2026.3
 google-genai==2.25.0
 pydantic==2.13.5
+gunicorn==23.0.0

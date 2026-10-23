@@ -28,3 +28,7 @@ Thumbs.db
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Arquivos estáticos gerados (collectstatic)
+staticfiles/
+!.env.example
