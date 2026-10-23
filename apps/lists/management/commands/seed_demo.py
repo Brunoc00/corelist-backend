@@ -4,6 +4,10 @@ Uso: python manage.py seed_demo
 
 Serve para testar no celular e para a apresentação. Só roda com DEBUG=True,
 porque a senha abaixo é pública (está no repositório).
+
+A demo usa produtos de marca com código de barras real, para a tela
+"Produtos com menor preço" mostrar foto e marca (vindas do Open Food Facts).
+Sem internet, os produtos são criados com nome e marca, só sem foto.
 """
 
 from datetime import timedelta
@@ -23,14 +27,53 @@ DEMO_EMAIL = 'demo@comprafacil.test'
 DEMO_SENHA = 'Demo@CompraFacil2026'
 DEMO_NOME = 'Demo'
 
-# Produto que tem foto e marca no Open Food Facts.
-CODIGO_COM_FOTO = '7891000100103'
+# chave: (código de barras, nome, marca, embalagem, categoria)
+PRODUTOS_DEMO = {
+    'arroz': ('7896006711155', 'Arroz tipo 1', 'Camil', '5 kg', 'Alimentos'),
+    'feijao': ('7896006744115', 'Feijão carioca', 'Camil', '1 kg', 'Alimentos'),
+    'cafe': ('7896089011357', 'Café torrado e moído', 'Pilão', '500 g', 'Bebidas'),
+    'leite': ('7891000100103', 'Leite condensado', 'Nestlé', '395 g', 'Alimentos'),
+    'lamen': ('7891079000229', 'Lámen galinha caipira', 'Nissin', '85 g', 'Alimentos'),
+    'toddy': ('7894321711171', 'Achocolatado em pó', 'Toddy', '200 g', 'Bebidas'),
+}
+
+# (nome, orçamento, dias atrás, [(produto, quantidade, preço)])
+COMPRAS_CONCLUIDAS = [
+    ('Compra do mês passado', '250', 35, [
+        ('arroz', 1, '24.90'),
+        ('feijao', 2, '8.90'),
+        ('cafe', 1, '16.90'),
+        ('leite', 2, '8.49'),
+        ('toddy', 2, '7.90'),
+    ]),
+    ('Feira', '100', 10, [
+        ('arroz', 1, '23.90'),
+        ('feijao', 2, '8.50'),
+        ('leite', 1, '7.99'),
+        ('lamen', 6, '2.49'),
+    ]),
+    ('Lanche da semana', '60', 3, [
+        ('cafe', 1, '17.50'),
+        ('toddy', 1, '8.50'),
+        ('lamen', 4, '2.69'),
+    ]),
+]
+
+# (produto, quantidade, preço, já no carrinho)
+LISTA_EM_ANDAMENTO = [
+    ('arroz', 1, '21.90', True),
+    ('leite', 3, '6.99', False),
+    ('cafe', 1, '14.90', False),
+    ('feijao', 2, '9.20', False),
+    ('lamen', 5, '1.99', False),
+    ('toddy', 1, '6.99', False),
+]
 
 
 class Command(BaseCommand):
     help = (
-        'Cria a conta de demonstração (listas, compras e produto com foto). '
-        'Só funciona com DEBUG=True.'
+        'Cria a conta de demonstração (listas, compras e produtos de marca '
+        'com foto). Só funciona com DEBUG=True.'
     )
 
     def handle(self, *args, **options):
@@ -42,65 +85,35 @@ class Command(BaseCommand):
 
         call_command('seed_products', stdout=self.stdout)
 
-        usuario = User.objects.filter(email=DEMO_EMAIL).first()
-
-        if usuario is None:
-            usuario = User.objects.create_user(
-                email=DEMO_EMAIL,
-                password=DEMO_SENHA,
-                first_name=DEMO_NOME,
-            )
-        else:
-            usuario.set_password(DEMO_SENHA)
-            usuario.first_name = DEMO_NOME
-            usuario.save()
+        usuario = self.conta_demo()
 
         # Recomeça do zero a cada execução.
         List.objects.filter(owner=usuario).delete()
 
         produtos = {
-            nome: Product.objects.get(name=nome)
-            for nome in ['Arroz', 'Feijão', 'Café', 'Suco', 'Detergente']
+            chave: self.produto_de_marca(*dados)
+            for chave, dados in PRODUTOS_DEMO.items()
         }
-        produtos['Leite condensado'] = self.produto_com_foto()
 
         agora = timezone.now()
 
-        self.compra_concluida(
-            usuario,
-            'Compra do mês passado',
-            '250',
-            agora - timedelta(days=35),
-            [
-                ('Arroz', 1, '24.90'),
-                ('Feijão', 2, '8.90'),
-                ('Café', 1, '16.90'),
-                ('Leite condensado', 2, '8.49'),
-                ('Suco', 4, '6.50'),
-            ],
-        )
-        self.compra_concluida(
-            usuario,
-            'Feira',
-            '100',
-            agora - timedelta(days=10),
-            [
-                ('Arroz', 1, '23.90'),
-                ('Feijão', 2, '8.50'),
-                ('Leite condensado', 1, '7.99'),
-            ],
-        )
-        self.compra_concluida(
-            usuario,
-            'Churrasco',
-            '120',
-            agora - timedelta(days=3),
-            [
-                ('Detergente', 2, '3.20'),
-                ('Suco', 6, '6.90'),
-                ('Café', 1, '17.50'),
-            ],
-        )
+        for nome, orcamento, dias_atras, itens in COMPRAS_CONCLUIDAS:
+            lista = List.objects.create(
+                owner=usuario,
+                name=nome,
+                budget=Decimal(orcamento),
+                is_completed=True,
+                completed_at=agora - timedelta(days=dias_atras),
+            )
+
+            for chave, quantidade, preco in itens:
+                ListItem.objects.create(
+                    list=lista,
+                    product=produtos[chave],
+                    quantity=quantidade,
+                    price=Decimal(preco),
+                    is_completed=True,
+                )
 
         ativa = List.objects.create(
             owner=usuario,
@@ -108,74 +121,59 @@ class Command(BaseCommand):
             budget=Decimal('150'),
         )
 
-        for nome, quantidade, preco, no_carrinho in [
-            ('Arroz', 1, '21.90', True),
-            ('Leite condensado', 3, '6.99', False),
-            ('Café', 1, '14.90', False),
-            ('Feijão', 2, '9.20', False),
-            ('Detergente', 2, '2.79', False),
-        ]:
+        for chave, quantidade, preco, no_carrinho in LISTA_EM_ANDAMENTO:
             ListItem.objects.create(
                 list=ativa,
-                product=produtos[nome],
+                product=produtos[chave],
                 quantity=quantidade,
                 price=Decimal(preco),
                 is_completed=no_carrinho,
             )
 
+        com_foto = sum(1 for p in produtos.values() if p.image_url)
+
         self.stdout.write(self.style.SUCCESS(
             f'Conta demo pronta: {DEMO_EMAIL} '
-            '(senha em apps/lists/management/commands/seed_demo.py).'
+            '(senha em apps/lists/management/commands/seed_demo.py). '
+            f'Produtos com foto: {com_foto} de {len(produtos)}.'
         ))
 
-    def produto_com_foto(self):
-        produto = Product.objects.filter(barcode=CODIGO_COM_FOTO).first()
+    def conta_demo(self):
+        usuario = User.objects.filter(email=DEMO_EMAIL).first()
 
-        if produto is not None:
-            return produto
-
-        sugestao = buscar_por_codigo(CODIGO_COM_FOTO)
-        categoria = Category.objects.filter(name='Alimentos').first()
-
-        if sugestao is None:
-            # Sem internet: cria sem foto, o resto da demo funciona igual.
-            return Product.objects.create(
-                name='Leite condensado',
-                package_size='395 g',
-                barcode=CODIGO_COM_FOTO,
-                category=categoria,
+        if usuario is None:
+            return User.objects.create_user(
+                email=DEMO_EMAIL,
+                password=DEMO_SENHA,
+                first_name=DEMO_NOME,
             )
 
-        return Product.objects.create(
-            name=sugestao['name'],
-            brand=sugestao['brand'],
-            package_size=sugestao['package_size'],
-            image_url=sugestao['image_url'],
-            barcode=CODIGO_COM_FOTO,
-            data_source=Product.SOURCE_OPEN_FOOD_FACTS,
-            category=categoria,
-        )
+        usuario.set_password(DEMO_SENHA)
+        usuario.first_name = DEMO_NOME
+        usuario.save()
 
-    def compra_concluida(self, usuario, nome, orcamento, quando, itens):
-        lista = List.objects.create(
-            owner=usuario,
-            name=nome,
-            budget=Decimal(orcamento),
-            is_completed=True,
-            completed_at=quando,
-        )
+        return usuario
 
-        for nome_produto, quantidade, preco in itens:
-            ListItem.objects.create(
-                list=lista,
-                product=self.produto(nome_produto),
-                quantity=quantidade,
-                price=Decimal(preco),
-                is_completed=True,
+    def produto_de_marca(self, codigo, nome, marca, embalagem, categoria):
+        produto = Product.objects.filter(barcode=codigo).first()
+
+        if produto is None:
+            produto = Product(
+                barcode=codigo,
+                name=nome,
+                brand=marca,
+                package_size=embalagem,
+                category=Category.objects.filter(name=categoria).first(),
             )
 
-    def produto(self, nome):
-        if nome == 'Leite condensado':
-            return self.produto_com_foto()
+        # Completa só a foto; nome e marca da demo ficam padronizados.
+        if not produto.image_url:
+            sugestao = buscar_por_codigo(codigo)
 
-        return Product.objects.get(name=nome)
+            if sugestao and sugestao['image_url']:
+                produto.image_url = sugestao['image_url']
+                produto.data_source = Product.SOURCE_OPEN_FOOD_FACTS
+
+        produto.save()
+
+        return produto
