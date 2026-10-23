@@ -609,7 +609,7 @@ class ListItemTests(TestCase):
             self.shopping_list.completed_at
         )
 
-    def test_user_cannot_update_item_from_completed_list(
+    def test_user_can_update_item_from_completed_list(
             self,
     ):
         self.item.price = '30.00'
@@ -622,23 +622,33 @@ class ListItemTests(TestCase):
             f'/api/lists/{self.shopping_list.id}/items/{self.item.id}/',
             {
                 'price': '10.00',
+                'quantity': '3',
             },
             format='json',
         )
 
         self.assertEqual(
             response.status_code,
-            404,
+            200,
         )
 
         self.item.refresh_from_db()
+        self.shopping_list.refresh_from_db()
 
         self.assertEqual(
             self.item.price,
-            30,
+            Decimal('10.00'),
+        )
+        self.assertEqual(
+            self.item.quantity,
+            Decimal('3'),
+        )
+        # Editar um item não reabre a lista.
+        self.assertTrue(
+            self.shopping_list.is_completed
         )
 
-    def test_user_cannot_delete_item_from_completed_list(
+    def test_user_can_delete_item_from_completed_list(
             self,
     ):
         self.shopping_list.is_completed = True
@@ -650,16 +660,16 @@ class ListItemTests(TestCase):
 
         self.assertEqual(
             response.status_code,
-            404,
+            204,
         )
 
-        self.assertTrue(
+        self.assertFalse(
             ListItem.objects.filter(
                 id=self.item.id,
             ).exists()
         )
 
-    def test_user_cannot_create_item_in_completed_list(
+    def test_user_can_create_item_in_completed_list(
             self,
     ):
         self.shopping_list.is_completed = True
@@ -677,14 +687,81 @@ class ListItemTests(TestCase):
 
         self.assertEqual(
             response.status_code,
-            404,
+            201,
         )
 
         self.assertEqual(
             ListItem.objects.filter(
                 list=self.shopping_list,
             ).count(),
-            1,
+            2,
+        )
+
+    def test_user_cannot_update_item_from_another_users_completed_list(
+            self,
+    ):
+        other_list = List.objects.create(
+            name='Lista de outro usuário',
+            owner=self.other_user,
+            is_completed=True,
+            completed_at=timezone.now(),
+        )
+
+        other_item = ListItem.objects.create(
+            list=other_list,
+            product=self.product,
+            quantity=1,
+            price='5.00',
+        )
+
+        response = self.client.patch(
+            f'/api/lists/{other_list.id}/items/{other_item.id}/',
+            {
+                'price': '1.00',
+            },
+            format='json',
+        )
+
+        self.assertEqual(
+            response.status_code,
+            404,
+        )
+
+        other_item.refresh_from_db()
+
+        self.assertEqual(
+            other_item.price,
+            Decimal('5.00'),
+        )
+
+    def test_user_cannot_create_item_in_another_users_completed_list(
+            self,
+    ):
+        other_list = List.objects.create(
+            name='Lista de outro usuário',
+            owner=self.other_user,
+            is_completed=True,
+            completed_at=timezone.now(),
+        )
+
+        response = self.client.post(
+            f'/api/lists/{other_list.id}/items/',
+            {
+                'product': self.product.id,
+                'quantity': 1,
+            },
+            format='json',
+        )
+
+        self.assertEqual(
+            response.status_code,
+            404,
+        )
+
+        self.assertFalse(
+            ListItem.objects.filter(
+                list=other_list,
+            ).exists()
         )
 
     def test_user_cannot_update_completed_list(self):
@@ -1660,6 +1737,10 @@ class ListItemTests(TestCase):
             promotions,
             [
                 {
+                    'item_id': self.item.id,
+                    'list_id': self.shopping_list.id,
+                    'list_name': 'Lista de teste',
+                    'quantity': Decimal('2.00'),
                     'product': 'Arroz',
                     'current_price': Decimal('8.00'),
                     'historical_average': Decimal('10.00'),

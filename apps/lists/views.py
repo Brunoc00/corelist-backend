@@ -4,6 +4,7 @@ from django.db.models import F, Sum
 from django.db.models.functions import Coalesce, TruncMonth
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+
 from .services.promotions import get_promotions
 
 from rest_framework import generics, status
@@ -25,13 +26,19 @@ class ListListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return List.objects.filter(owner=self.request.user)
+        return List.objects.filter(
+            owner=self.request.user,
+        )
 
     def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)
+        serializer.save(
+            owner=self.request.user,
+        )
 
 
-class ListDetailView(generics.RetrieveUpdateDestroyAPIView):
+class ListDetailView(
+    generics.RetrieveUpdateDestroyAPIView
+):
     serializer_class = ListSerializer
     permission_classes = [IsAuthenticated]
 
@@ -62,6 +69,7 @@ class ListCompleteView(APIView):
 
         shopping_list.is_completed = True
         shopping_list.completed_at = timezone.now()
+
         shopping_list.save(
             update_fields=[
                 'is_completed',
@@ -72,7 +80,9 @@ class ListCompleteView(APIView):
 
         serializer = ListSerializer(
             shopping_list,
-            context={'request': request},
+            context={
+                'request': request,
+            },
         )
 
         return Response(
@@ -81,7 +91,12 @@ class ListCompleteView(APIView):
         )
 
 
-class ListItemListCreateView(generics.ListCreateAPIView):
+# Os itens continuam editáveis depois que a lista é concluída, para o
+# usuário corrigir preços e quantidades da compra. A lista em si
+# (nome, orçamento, exclusão) fica bloqueada em ListDetailView.
+class ListItemListCreateView(
+    generics.ListCreateAPIView
+):
     serializer_class = ListItemSerializer
     permission_classes = [IsAuthenticated]
 
@@ -96,10 +111,11 @@ class ListItemListCreateView(generics.ListCreateAPIView):
             List,
             id=self.kwargs['list_id'],
             owner=self.request.user,
-            is_completed=False,
         )
 
-        serializer.save(list=shopping_list)
+        serializer.save(
+            list=shopping_list,
+        )
 
 
 class ListItemDetailView(
@@ -112,7 +128,6 @@ class ListItemDetailView(
         return ListItem.objects.filter(
             list__owner=self.request.user,
             list_id=self.kwargs['list_id'],
-            list__is_completed=False,
         )
 
 
@@ -152,7 +167,8 @@ class ListSummaryView(APIView):
 
         if lists_count > 0:
             average_purchase = (
-                    total_spent['total'] / lists_count
+                total_spent['total']
+                / lists_count
             )
         else:
             average_purchase = Decimal('0.00')
@@ -178,7 +194,9 @@ class ListSummaryView(APIView):
 
         monthly = [
             {
-                'month': item['month'].strftime('%Y-%m'),
+                'month': item['month'].strftime(
+                    '%Y-%m'
+                ),
                 'total': item['total'],
             }
             for item in monthly_query
@@ -228,7 +246,9 @@ class ListSummaryView(APIView):
 
         top_products = [
             {
-                'product': item['product__name'],
+                'product': item[
+                    'product__name'
+                ],
                 'quantity': item['quantity'],
             }
             for item in top_products_query
@@ -238,29 +258,43 @@ class ListSummaryView(APIView):
             previous_period = monthly[-2]
             current_period = monthly[-1]
 
-            previous_total = previous_period['total']
-            current_total = current_period['total']
+            previous_total = (
+                previous_period['total']
+            )
+
+            current_total = (
+                current_period['total']
+            )
 
             difference = (
-                    current_total - previous_total
+                current_total
+                - previous_total
             )
 
             if previous_total != 0:
                 percentage_change = (
-                        difference
-                        / previous_total
-                        * Decimal('100')
+                    difference
+                    / previous_total
+                    * Decimal('100')
                 )
             else:
-                percentage_change = Decimal('0.00')
+                percentage_change = (
+                    Decimal('0.00')
+                )
 
             period_comparison = {
-                'previous_month': previous_period['month'],
-                'previous_total': previous_total,
-                'current_month': current_period['month'],
-                'current_total': current_total,
-                'difference': difference,
-                'percentage_change': percentage_change,
+                'previous_month':
+                    previous_period['month'],
+                'previous_total':
+                    previous_total,
+                'current_month':
+                    current_period['month'],
+                'current_total':
+                    current_total,
+                'difference':
+                    difference,
+                'percentage_change':
+                    percentage_change,
             }
 
         elif len(monthly) == 1:
@@ -268,21 +302,30 @@ class ListSummaryView(APIView):
 
             period_comparison = {
                 'previous_month': '',
-                'previous_total': Decimal('0.00'),
-                'current_month': current_period['month'],
-                'current_total': current_period['total'],
-                'difference': current_period['total'],
-                'percentage_change': Decimal('0.00'),
+                'previous_total':
+                    Decimal('0.00'),
+                'current_month':
+                    current_period['month'],
+                'current_total':
+                    current_period['total'],
+                'difference':
+                    current_period['total'],
+                'percentage_change':
+                    Decimal('0.00'),
             }
 
         else:
             period_comparison = {
                 'previous_month': '',
-                'previous_total': Decimal('0.00'),
+                'previous_total':
+                    Decimal('0.00'),
                 'current_month': '',
-                'current_total': Decimal('0.00'),
-                'difference': Decimal('0.00'),
-                'percentage_change': Decimal('0.00'),
+                'current_total':
+                    Decimal('0.00'),
+                'difference':
+                    Decimal('0.00'),
+                'percentage_change':
+                    Decimal('0.00'),
             }
 
         summary = {
@@ -292,10 +335,13 @@ class ListSummaryView(APIView):
             'monthly': monthly,
             'categories': categories,
             'top_products': top_products,
-            'period_comparison': period_comparison,
+            'period_comparison':
+                period_comparison,
         }
 
-        serializer = ListSummarySerializer(summary)
+        serializer = ListSummarySerializer(
+            summary,
+        )
 
         return Response(
             serializer.data,
@@ -317,6 +363,7 @@ class ListInsightsView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
 
 class ListPromotionsView(APIView):
     permission_classes = [IsAuthenticated]

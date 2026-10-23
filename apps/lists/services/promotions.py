@@ -13,7 +13,7 @@ def get_promotions(user):
             list__is_completed=False,
             price__isnull=False,
         )
-        .select_related('product')
+        .select_related('product', 'list')
     )
 
     for item in current_items:
@@ -39,6 +39,10 @@ def get_promotions(user):
 
         promotions.append(
             {
+                'item_id': item.id,
+                'list_id': item.list_id,
+                'list_name': item.list.name,
+                'quantity': item.quantity,
                 'product': item.product.name,
                 'current_price': item.price,
                 'historical_average': historical_average,
