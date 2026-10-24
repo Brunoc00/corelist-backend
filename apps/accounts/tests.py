@@ -71,6 +71,20 @@ class MeTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['email'], 'maria@example.com')
         self.assertEqual(response.data['first_name'], 'Maria')
+        self.assertFalse(response.data['is_staff'])
+
+    def test_user_cannot_make_themselves_admin(self):
+        self.client.force_authenticate(user=self.user)
+
+        self.client.patch(
+            '/api/auth/me/',
+            {'is_staff': True},
+            format='json',
+        )
+
+        self.user.refresh_from_db()
+
+        self.assertFalse(self.user.is_staff)
 
     def test_user_can_update_name(self):
         self.client.force_authenticate(user=self.user)

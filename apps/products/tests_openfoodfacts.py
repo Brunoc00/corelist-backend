@@ -289,6 +289,9 @@ class ProductBarcodeFieldsTests(TestCase):
         self.assertEqual(Product.objects.filter(barcode='').count(), 2)
 
     def test_updating_product_keeps_its_own_barcode(self):
+        self.user.is_staff = True
+        self.user.save()
+
         produto = Product.objects.create(name='Arroz', barcode=EAN13)
 
         response = self.client.patch(

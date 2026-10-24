@@ -77,7 +77,41 @@ class ProductTests(TestCase):
             'Arroz',
         )
 
-    def test_user_can_update_product(self):
+    def tornar_admin(self):
+        self.user.is_staff = True
+        self.user.save()
+
+    def test_regular_user_cannot_update_product(self):
+        response = self.client.patch(
+            f'/api/products/{self.product.id}/',
+            {
+                'price': '30.00',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+        self.product.refresh_from_db()
+
+        self.assertEqual(str(self.product.price), '27.50')
+
+    def test_regular_user_cannot_delete_product(self):
+        response = self.client.delete(
+            f'/api/products/{self.product.id}/'
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+        self.assertTrue(
+            Product.objects.filter(
+                id=self.product.id
+            ).exists()
+        )
+
+    def test_admin_can_update_product(self):
+        self.tornar_admin()
+
         response = self.client.patch(
             f'/api/products/{self.product.id}/',
             {
@@ -89,7 +123,9 @@ class ProductTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['price'], '30.00')
 
-    def test_user_can_delete_product(self):
+    def test_admin_can_delete_product(self):
+        self.tornar_admin()
+
         response = self.client.delete(
             f'/api/products/{self.product.id}/'
         )
@@ -100,6 +136,24 @@ class ProductTests(TestCase):
             Product.objects.filter(
                 id=self.product.id
             ).exists()
+        )
+
+    def test_admin_cannot_delete_product_used_in_a_list(self):
+        from apps.lists.models import List, ListItem
+
+        self.tornar_admin()
+
+        lista = List.objects.create(name='Mercado', owner=self.user)
+        ListItem.objects.create(list=lista, product=self.product)
+
+        response = self.client.delete(
+            f'/api/products/{self.product.id}/'
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn('detail', response.data)
+        self.assertTrue(
+            Product.objects.filter(id=self.product.id).exists()
         )
 
     def test_unauthenticated_user_cannot_list_products(self):
@@ -165,6 +219,8 @@ class ProductTests(TestCase):
         )
 
     def test_user_cannot_update_product_with_invalid_category(self):
+        self.tornar_admin()
+
         response = self.client.patch(
             f'/api/products/{self.product.id}/',
             {

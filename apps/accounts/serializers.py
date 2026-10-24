@@ -12,7 +12,10 @@ class UserSerializer(serializers.ModelSerializer):
             'email',
             'first_name',
             'last_name',
+            # O frontend usa para mostrar ou esconder "apagar produto".
+            'is_staff',
         )
+        read_only_fields = ('is_staff',)
 
 
 class RegisterSerializer(serializers.ModelSerializer):
