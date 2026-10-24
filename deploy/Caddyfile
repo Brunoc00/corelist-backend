@@ -1,0 +1,5 @@
+# HTTPS automático para o domínio do backend (ex.: 54-207-10-20.sslip.io).
+{$DOMINIO} {
+	encode gzip
+	reverse_proxy api:8000
+}
