@@ -172,7 +172,7 @@ class Command(BaseCommand):
 
             if sugestao and sugestao['image_url']:
                 produto.image_url = sugestao['image_url']
-                produto.data_source = Product.SOURCE_OPEN_FOOD_FACTS
+                produto.data_source = sugestao['data_source']
 
         produto.save()
 

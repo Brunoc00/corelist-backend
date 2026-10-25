@@ -11,10 +11,14 @@ class Category(models.Model):
 class Product(models.Model):
     SOURCE_MANUAL = 'manual'
     SOURCE_OPEN_FOOD_FACTS = 'openfoodfacts'
+    SOURCE_OPEN_BEAUTY_FACTS = 'openbeautyfacts'
+    SOURCE_OPEN_PRODUCTS_FACTS = 'openproductsfacts'
 
     SOURCE_CHOICES = [
         (SOURCE_MANUAL, 'Cadastro manual'),
         (SOURCE_OPEN_FOOD_FACTS, 'Open Food Facts'),
+        (SOURCE_OPEN_BEAUTY_FACTS, 'Open Beauty Facts'),
+        (SOURCE_OPEN_PRODUCTS_FACTS, 'Open Products Facts'),
     ]
 
     name = models.CharField(max_length=200)

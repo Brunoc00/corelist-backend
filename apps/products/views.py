@@ -51,12 +51,12 @@ class ProductLookupView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        # sugestao já traz data_source (a base onde o produto foi achado).
         return Response({
             'origem': 'openfoodfacts',
             'sugestao': {
                 **sugestao,
                 'barcode': codigo,
-                'data_source': Product.SOURCE_OPEN_FOOD_FACTS,
             },
         })
 

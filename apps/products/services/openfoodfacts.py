@@ -1,12 +1,17 @@
-"""Consulta de produtos no Open Food Facts pelo código de barras.
+"""Consulta de produtos pelo código de barras no Open Food Facts e nos
+projetos irmãos (mesma API e mesmas licenças):
 
-Regras do Open Food Facts que este módulo respeita:
-- no máximo 15 consultas de produto por minuto por IP: por isso cada código
-  fica 24 h em cache (encontrado ou não) e o produto salvo no catálogo não é
-  consultado de novo;
+1. Open Food Facts: alimentos e bebidas;
+2. Open Beauty Facts: higiene e beleza;
+3. Open Products Facts: limpeza e outros.
+
+Regras que este módulo respeita:
+- no máximo 15 consultas de produto por minuto por IP em cada base: por isso
+  cada código fica 24 h em cache (encontrado ou não) e o produto salvo no
+  catálogo não é consultado de novo;
 - toda chamada leva um User-Agent que identifica o app;
-- dados sob ODbL e fotos sob CC BY-SA: o frontend mostra o crédito quando
-  `data_source` é `openfoodfacts`.
+- dados sob ODbL e fotos sob CC BY-SA: o frontend mostra o crédito da base
+  indicada em `data_source`.
 """
 
 import json
@@ -21,7 +26,12 @@ from django.core.cache import cache
 
 logger = logging.getLogger(__name__)
 
-API_URL = 'https://world.openfoodfacts.org/api/v2/product/{codigo}'
+# Ordem de busca: (valor de data_source, endereço da API).
+FONTES = [
+    ('openfoodfacts', 'https://world.openfoodfacts.org/api/v2/product/{codigo}'),
+    ('openbeautyfacts', 'https://world.openbeautyfacts.org/api/v2/product/{codigo}'),
+    ('openproductsfacts', 'https://world.openproductsfacts.org/api/v2/product/{codigo}'),
+]
 
 CAMPOS = ','.join([
     'product_name_pt',
@@ -97,9 +107,9 @@ def _converter(produto):
     }
 
 
-def _consultar(codigo):
+def _consultar(codigo, api_url):
     request = Request(
-        API_URL.format(codigo=quote(codigo)) + f'?fields={CAMPOS}',
+        api_url.format(codigo=quote(codigo)) + f'?fields={CAMPOS}',
         headers={
             'User-Agent': settings.OPEN_FOOD_FACTS_USER_AGENT,
             'Accept': 'application/json',
@@ -110,14 +120,14 @@ def _consultar(codigo):
         with urlopen(request, timeout=TIMEOUT_SEGUNDOS) as response:
             dados = json.loads(response.read().decode('utf-8'))
     except HTTPError as erro:
-        # 404 é o "produto não existe" do Open Food Facts; o resto é falha.
+        # 404 é o "produto não existe" dessas bases; o resto é falha.
         if erro.code != 404:
             logger.warning(
-                'Open Food Facts respondeu %s para %s', erro.code, codigo,
+                '%s respondeu %s para %s', api_url, erro.code, codigo,
             )
         return None
     except (URLError, TimeoutError, ValueError, OSError):
-        logger.exception('Erro ao consultar o Open Food Facts (%s)', codigo)
+        logger.exception('Erro ao consultar %s (%s)', api_url, codigo)
         return None
 
     if dados.get('status') != 1 or not isinstance(
@@ -129,8 +139,9 @@ def _consultar(codigo):
 
 
 def buscar_por_codigo(codigo):
-    """Dados do produto no Open Food Facts, ou None.
+    """Dados do produto (com `data_source` da base onde foi achado), ou None.
 
+    Tenta as bases na ordem de FONTES e para na primeira que achar.
     Nunca lança exceção: erro de rede, timeout ou resposta estranha viram
     None, como acontece com o Gemini.
     """
@@ -148,7 +159,14 @@ def buscar_por_codigo(codigo):
     if em_cache is not None:
         return em_cache
 
-    resultado = _consultar(codigo)
+    resultado = None
+
+    for fonte, api_url in FONTES:
+        encontrado = _consultar(codigo, api_url)
+
+        if encontrado is not None:
+            resultado = {**encontrado, 'data_source': fonte}
+            break
 
     cache.set(
         chave,

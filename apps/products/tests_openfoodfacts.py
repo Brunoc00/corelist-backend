@@ -80,6 +80,7 @@ class BuscarPorCodigoTests(TestCase):
                 'brand': 'Marca Teste',
                 'package_size': '500 g',
                 'image_url': 'https://images.openfoodfacts.org/cafe.jpg',
+                'data_source': 'openfoodfacts',
             },
         )
 
@@ -135,9 +136,49 @@ class BuscarPorCodigoTests(TestCase):
         mock_urlopen.assert_not_called()
 
     @patch(URLOPEN)
+    def test_falls_back_to_open_beauty_facts(self, mock_urlopen):
+        mock_urlopen.side_effect = [
+            resposta_off({'status': 0}),
+            resposta_off(PRODUTO_OFF),
+        ]
+
+        resultado = buscar_por_codigo(EAN13)
+
+        self.assertEqual(resultado['data_source'], 'openbeautyfacts')
+        self.assertIn(
+            'openbeautyfacts.org',
+            mock_urlopen.call_args.args[0].full_url,
+        )
+
+    @patch(URLOPEN)
+    def test_falls_back_to_open_products_facts(self, mock_urlopen):
+        mock_urlopen.side_effect = [
+            HTTPError('url', 404, 'Not Found', None, None),
+            resposta_off({'status': 0}),
+            resposta_off(PRODUTO_OFF),
+        ]
+
+        resultado = buscar_por_codigo(EAN13)
+
+        self.assertEqual(resultado['data_source'], 'openproductsfacts')
+        self.assertEqual(mock_urlopen.call_count, 3)
+
+    @patch(URLOPEN)
+    def test_stops_at_first_base_that_finds(self, mock_urlopen):
+        mock_urlopen.return_value = resposta_off(PRODUTO_OFF)
+
+        buscar_por_codigo(EAN13)
+
+        self.assertEqual(mock_urlopen.call_count, 1)
+
+    @patch(URLOPEN)
     def test_caches_found_and_not_found(self, mock_urlopen):
+        # Código 1: achado na primeira base (1 chamada).
+        # Código 2: não achado em nenhuma das 3 bases (3 chamadas).
         mock_urlopen.side_effect = [
             resposta_off(PRODUTO_OFF),
+            resposta_off({'status': 0}),
+            resposta_off({'status': 0}),
             resposta_off({'status': 0}),
         ]
 
@@ -146,7 +187,7 @@ class BuscarPorCodigoTests(TestCase):
         buscar_por_codigo(EAN13_OUTRO)
         buscar_por_codigo(EAN13_OUTRO)
 
-        self.assertEqual(mock_urlopen.call_count, 2)
+        self.assertEqual(mock_urlopen.call_count, 4)
 
 
 class ProductLookupTests(TestCase):
@@ -200,6 +241,7 @@ class ProductLookupTests(TestCase):
             'brand': 'Marca Teste',
             'package_size': '500 g',
             'image_url': 'https://images.openfoodfacts.org/cafe.jpg',
+            'data_source': 'openfoodfacts',
         }
 
         response = self.client.get(
