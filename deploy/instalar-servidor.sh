@@ -1,24 +1,19 @@
 #!/bin/bash
-# Prepara uma máquina Amazon Linux 2023 para rodar o CompraFácil.
-# Use como "User data" ao criar a instância EC2 (roda uma vez, como root).
+# Prepara uma máquina Ubuntu Server 24.04 LTS para rodar o CompraFácil.
+# Use como "Dados do usuário" (User data) ao criar a instância EC2:
+# roda uma vez, como root, quando a máquina liga pela primeira vez.
 set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
 
-# Docker e git
-dnf install -y docker git
+# Docker, plugin "docker compose" e git
+apt-get update
+apt-get install -y docker.io docker-compose-v2 git
 systemctl enable --now docker
-usermod -aG docker ec2-user
-
-# Plugin "docker compose" (o pacote do Amazon Linux não traz)
-COMPOSE_VERSAO=v2.29.7
-mkdir -p /usr/local/lib/docker/cli-plugins
-curl -fsSL \
-  "https://github.com/docker/compose/releases/download/${COMPOSE_VERSAO}/docker-compose-linux-$(uname -m)" \
-  -o /usr/local/lib/docker/cli-plugins/docker-compose
-chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+usermod -aG docker ubuntu
 
 # 2 GB de swap: dá folga para o build e para o PostgreSQL em máquina pequena
 if [ ! -f /swapfile ]; then
-  dd if=/dev/zero of=/swapfile bs=1M count=2048
+  fallocate -l 2G /swapfile
   chmod 600 /swapfile
   mkswap /swapfile
   swapon /swapfile
