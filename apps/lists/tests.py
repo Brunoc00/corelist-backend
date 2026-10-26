@@ -152,6 +152,54 @@ class ListItemTests(TestCase):
             '3.00',
         )
 
+    def test_item_is_by_unit_by_default(self):
+        response = self.client.post(
+            f'/api/lists/{self.shopping_list.id}/items/',
+            {'product': self.product.id, 'quantity': 2},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['measure'], 'unit')
+
+    def test_user_can_create_item_by_weight(self):
+        response = self.client.post(
+            f'/api/lists/{self.shopping_list.id}/items/',
+            {
+                'product': self.product.id,
+                'quantity': '1.25',
+                'measure': 'kg',
+                'price': '8.00',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['measure'], 'kg')
+        # 1,25 kg x R$ 8,00/kg
+        self.assertEqual(response.data['subtotal'], '10.00')
+
+    def test_user_can_switch_item_to_weight(self):
+        response = self.client.patch(
+            f'/api/lists/{self.shopping_list.id}/items/{self.item.id}/',
+            {'measure': 'kg', 'quantity': '0.5'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.measure, 'kg')
+
+    def test_invalid_measure_is_rejected(self):
+        response = self.client.post(
+            f'/api/lists/{self.shopping_list.id}/items/',
+            {'product': self.product.id, 'quantity': 1, 'measure': 'litro'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('measure', response.data)
+
     def test_user_cannot_create_item_in_another_users_list(self):
         self.client.force_authenticate(user=self.other_user)
 

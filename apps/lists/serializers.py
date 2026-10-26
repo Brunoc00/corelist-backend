@@ -20,6 +20,7 @@ class ListItemSerializer(serializers.ModelSerializer):
             'list',
             'product',
             'quantity',
+            'measure',
             'price',
             'subtotal',
             'is_completed',

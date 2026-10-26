@@ -61,6 +61,19 @@ class ListItem(models.Model):
         null=True,
         blank=True,
     )
+    # Como o usuário compra: por unidade (2 pacotes) ou por peso (1,5 kg).
+    # Em "kg", quantity é o peso e price é o preço do kg.
+    MEASURE_UNIT = 'unit'
+    MEASURE_KG = 'kg'
+    MEASURE_CHOICES = [
+        (MEASURE_UNIT, 'Unidade'),
+        (MEASURE_KG, 'Peso (kg)'),
+    ]
+    measure = models.CharField(
+        max_length=10,
+        choices=MEASURE_CHOICES,
+        default=MEASURE_UNIT,
+    )
     is_completed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
