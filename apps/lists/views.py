@@ -43,10 +43,14 @@ class ListDetailView(
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return List.objects.filter(
-            owner=self.request.user,
-            is_completed=False,
-        )
+        listas = List.objects.filter(owner=self.request.user)
+
+        # Compra concluída não é lida nem editada aqui (só pelo histórico),
+        # mas pode ser excluída, por exemplo uma nota importada por engano.
+        if self.request.method == 'DELETE':
+            return listas
+
+        return listas.filter(is_completed=False)
 
 
 class ListCompleteView(APIView):

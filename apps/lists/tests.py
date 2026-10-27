@@ -837,7 +837,8 @@ class ListItemTests(TestCase):
             'Lista de teste',
         )
 
-    def test_user_cannot_delete_completed_list(self):
+    def test_user_can_delete_completed_list(self):
+        # Ex.: uma nota fiscal importada por engano.
         self.shopping_list.is_completed = True
         self.shopping_list.save()
 
@@ -845,15 +846,23 @@ class ListItemTests(TestCase):
             f'/api/lists/{self.shopping_list.id}/'
         )
 
-        self.assertEqual(
-            response.status_code,
-            404,
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(
+            List.objects.filter(id=self.shopping_list.id).exists()
         )
 
+    def test_user_cannot_delete_another_users_completed_list(self):
+        self.shopping_list.is_completed = True
+        self.shopping_list.save()
+        self.client.force_authenticate(user=self.other_user)
+
+        response = self.client.delete(
+            f'/api/lists/{self.shopping_list.id}/'
+        )
+
+        self.assertEqual(response.status_code, 404)
         self.assertTrue(
-            List.objects.filter(
-                id=self.shopping_list.id,
-            ).exists()
+            List.objects.filter(id=self.shopping_list.id).exists()
         )
 
     def test_summary_returns_spending_by_category(self):
