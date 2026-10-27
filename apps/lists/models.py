@@ -22,8 +22,21 @@ class List(models.Model):
         null=True,
         blank=True,
     )
+    # Compra importada da nota fiscal (NFC-e): loja e chave de acesso.
+    store = models.CharField(max_length=200, blank=True, default='')
+    nfce_key = models.CharField(max_length=44, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            # A mesma nota não entra duas vezes no histórico do usuário.
+            models.UniqueConstraint(
+                fields=['owner', 'nfce_key'],
+                condition=~models.Q(nfce_key=''),
+                name='unique_nfce_por_usuario',
+            ),
+        ]
 
     @property
     def total(self):

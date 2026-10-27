@@ -8,6 +8,7 @@ from .views import (ListDetailView, ListListCreateView, ListItemListCreateView,
                     ListInsightsView,
                     ListPromotionsView
                     )
+from .views_nfce import NfceImportarView, NfceLerView
 
 
 urlpatterns = [
@@ -20,5 +21,7 @@ urlpatterns = [
     path('summary/',ListSummaryView.as_view(),name='list-summary',),
     path('insights/',ListInsightsView.as_view(),name='list-insights',),
     path('promotions/',ListPromotionsView.as_view(),name='list-promotions',),
+    path('nfce/ler/', NfceLerView.as_view(), name='nfce-ler'),
+    path('nfce/importar/', NfceImportarView.as_view(), name='nfce-importar'),
 
 ]

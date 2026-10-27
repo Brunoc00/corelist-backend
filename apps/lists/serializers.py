@@ -94,6 +94,8 @@ class ListSerializer(serializers.ModelSerializer):
             'budget',
             'is_completed',
             'completed_at',
+            'store',
+            'nfce_key',
             'items',
             'total',
             'history_comparison',
@@ -104,6 +106,8 @@ class ListSerializer(serializers.ModelSerializer):
             'id',
             'is_completed',
             'completed_at',
+            'store',
+            'nfce_key',
             'created_at',
             'updated_at',
         ]
@@ -240,3 +244,30 @@ class ListSummarySerializer(serializers.Serializer):
     )
 
     period_comparison = PeriodComparisonSerializer()
+
+class NfceLinkSerializer(serializers.Serializer):
+    link = serializers.CharField(max_length=2000)
+
+
+class NfceItemImportSerializer(serializers.Serializer):
+    nome = serializers.CharField(max_length=200)
+    quantidade = serializers.DecimalField(
+        max_digits=10, decimal_places=2, min_value=Decimal('0.01'),
+    )
+    medida = serializers.ChoiceField(
+        choices=[ListItem.MEASURE_UNIT, ListItem.MEASURE_KG],
+    )
+    preco = serializers.DecimalField(
+        max_digits=10, decimal_places=2, min_value=Decimal('0'),
+    )
+
+
+class NfceImportSerializer(NfceLinkSerializer):
+    nome = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    # Itens conferidos pelo usuário. Sem eles, entram os itens da nota.
+    itens = NfceItemImportSerializer(many=True, required=False)
+
+    def validate_itens(self, itens):
+        if not itens:
+            raise serializers.ValidationError('Informe ao menos um item.')
+        return itens
