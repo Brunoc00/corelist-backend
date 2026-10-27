@@ -136,3 +136,55 @@ class MeTests(TestCase):
         self.user.refresh_from_db()
 
         self.assertEqual(self.user.first_name, 'Maria')
+
+
+class SessaoTests(TestCase):
+    """Login mantido por 30 dias, renovado a cada uso."""
+
+    def setUp(self):
+        self.client = APIClient()
+        User.objects.create_user(
+            email='sessao@example.com', password='SenhaForte123!', first_name='Ana',
+        )
+        resposta = self.client.post(
+            '/api/auth/login/',
+            {'email': 'sessao@example.com', 'password': 'SenhaForte123!'},
+            format='json',
+        )
+        self.refresh = resposta.data['refresh']
+
+    def renovar(self, refresh):
+        return self.client.post(
+            '/api/auth/login/refresh/', {'refresh': refresh}, format='json',
+        )
+
+    def test_refresh_dura_30_dias(self):
+        from rest_framework_simplejwt.tokens import RefreshToken
+
+        token = RefreshToken(self.refresh)
+        dias = (token['exp'] - token['iat']) / 86400
+
+        self.assertEqual(dias, 30)
+
+    def test_renovar_devolve_um_refresh_novo(self):
+        resposta = self.renovar(self.refresh)
+
+        self.assertEqual(resposta.status_code, 200)
+        self.assertIn('access', resposta.data)
+        self.assertIn('refresh', resposta.data)
+        self.assertNotEqual(resposta.data['refresh'], self.refresh)
+
+    def test_refresh_antigo_nao_funciona_depois_de_renovar(self):
+        self.renovar(self.refresh)
+
+        resposta = self.renovar(self.refresh)
+
+        self.assertEqual(resposta.status_code, 401)
+
+    def test_sair_invalida_o_refresh(self):
+        resposta = self.client.post(
+            '/api/auth/logout/', {'refresh': self.refresh}, format='json',
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        self.assertEqual(self.renovar(self.refresh).status_code, 401)
