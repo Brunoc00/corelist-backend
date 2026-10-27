@@ -17,7 +17,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from html import unescape
 from urllib.error import URLError
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -50,14 +50,19 @@ class LinkInvalido(NfceErro):
 
 
 def validar_link(link):
-    """Devolve (link limpo, chave de acesso de 44 dígitos) ou levanta NfceErro."""
+    """Devolve (link limpo, chave de acesso de 44 dígitos) ou levanta NfceErro.
+
+    O QR code impresso usa http:// e o "|" sem codificar; o navegador
+    costuma trocar para https:// e %7C. Os dois formatos são aceitos, e a
+    consulta é sempre feita por https.
+    """
     link = (link or '').strip()
     partes = urlparse(link)
 
-    if partes.scheme != 'https' or partes.hostname not in HOSTS_PERMITIDOS:
+    if partes.scheme not in ('http', 'https') or partes.hostname not in HOSTS_PERMITIDOS:
         raise LinkInvalido('O link não é de uma nota fiscal da Sefaz do Amazonas.')
 
-    if partes.path != CAMINHO or partes.port not in (None, 443):
+    if partes.path != CAMINHO or partes.port is not None:
         raise LinkInvalido('O link não é de uma nota fiscal da Sefaz do Amazonas.')
 
     parametro = parse_qs(partes.query).get('p', [''])[0]
@@ -66,7 +71,8 @@ def validar_link(link):
     if not re.fullmatch(r'\d{44}', chave):
         raise LinkInvalido('Não encontrei a chave da nota no link.')
 
-    return f'https://{partes.hostname}{CAMINHO}?{partes.query}', chave
+    # Só o parâmetro p segue para a Sefaz, codificado ("|" vira %7C).
+    return f'https://{partes.hostname}{CAMINHO}?p={quote(parametro, safe="")}', chave
 
 
 def baixar_pagina(link):

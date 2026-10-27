@@ -74,10 +74,24 @@ class ValidarLinkTests(TestCase):
         _, chave = validar_link(LINK)
         self.assertEqual(chave, CHAVE)
 
+    def test_aceita_link_impresso_no_qr_code(self):
+        # O QR code da nota traz http:// e o "|" sem codificar.
+        link, chave = validar_link(
+            'http://sistemas.sefaz.am.gov.br/nfceweb/consultarNFCe.jsp'
+            f'?p={CHAVE}|3|1'
+        )
+
+        self.assertEqual(chave, CHAVE)
+        self.assertEqual(
+            link,
+            'https://sistemas.sefaz.am.gov.br/nfceweb/consultarNFCe.jsp'
+            f'?p={CHAVE}%7C3%7C1',
+        )
+
     def test_recusa_outro_site(self):
         for link in [
             'https://exemplo.com/nfceweb/consultarNFCe.jsp?p=' + CHAVE,
-            'http://sistemas.sefaz.am.gov.br/nfceweb/consultarNFCe.jsp?p=' + CHAVE,
+            'ftp://sistemas.sefaz.am.gov.br/nfceweb/consultarNFCe.jsp?p=' + CHAVE,
             'https://sistemas.sefaz.am.gov.br.exemplo.com/nfceweb/consultarNFCe.jsp?p=' + CHAVE,
             'https://sistemas.sefaz.am.gov.br/outra-pagina?p=' + CHAVE,
             'https://sistemas.sefaz.am.gov.br:8443/nfceweb/consultarNFCe.jsp?p=' + CHAVE,
