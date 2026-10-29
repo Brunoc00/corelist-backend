@@ -4,6 +4,11 @@
 #   cp .env.example .env   # e preencha (o compose lê o .env sozinho)
 #   docker compose up -d --build
 #
+# O CI/CD (.github/workflows/ci-cd.yml) não monta a imagem no servidor: ele
+# baixa a imagem testada do GitHub (IMAGEM_API) e sobe com
+# "docker compose pull api && docker compose up -d". O comando manual acima
+# continua funcionando (monta aqui mesmo).
+#
 # Caddy pega o certificado HTTPS sozinho (Let's Encrypt) para o DOMINIO.
 
 services:
@@ -24,6 +29,7 @@ services:
       retries: 10
 
   api:
+    image: ${IMAGEM_API:-ghcr.io/brunoc00/corelist-backend:latest}
     build: ..
     restart: unless-stopped
     env_file: .env

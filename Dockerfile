@@ -5,6 +5,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
+# Commit da versão (o CI/CD informa); aparece em /api/health/.
+ARG VERSAO=local
+ENV VERSAO=${VERSAO}
+
 WORKDIR /app
 
 COPY requirements.txt .

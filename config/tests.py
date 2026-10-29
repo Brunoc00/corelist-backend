@@ -23,3 +23,14 @@ class ApiSemCacheTests(TestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertIn('no-store', response['Cache-Control'])
+
+
+class HealthTests(TestCase):
+    def test_responde_ok_sem_login(self):
+        response = APIClient().get('/api/health/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'ok')
+        self.assertEqual(response.data['banco'], 'ok')
+        self.assertIn('versao', response.data)
+        self.assertIn('no-store', response['Cache-Control'])

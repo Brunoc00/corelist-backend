@@ -1,0 +1,206 @@
+# CI/CD do backend: Lint e testes → Imagem Docker → Deploy no EC2 → Smoke test.
+#
+# - Em todo push e pull request: lint, testes e montagem da imagem.
+# - No branch mvp-comprafacil (ou rodando à mão, em Actions → Run workflow):
+#   publica a imagem no GitHub Container Registry, atualiza o servidor (EC2)
+#   e confere que a versão nova está no ar.
+#
+# Configuração (Settings → Secrets and variables → Actions):
+#   segredos EC2_HOST, EC2_USER e EC2_SSH_KEY (chave SSH só para o deploy);
+#   variável opcional SMOKE_URL (padrão: o endereço do site publicado + /api).
+# Sem os segredos, o deploy é pulado (o resto do pipeline continua).
+name: CI/CD
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  BRANCH_DE_PRODUCAO: mvp-comprafacil
+  SMOKE_URL: ${{ vars.SMOKE_URL || 'https://mvp-comprafacil.dql3968zgbfv8.amplifyapp.com/api' }}
+
+jobs:
+  lint-e-testes:
+    name: Lint e testes (Django + PostgreSQL)
+    runs-on: ubuntu-latest
+
+    # Banco PostgreSQL descartável, só para os testes.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: corelist
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DB_NAME: corelist
+      DB_USER: ci
+      DB_PASSWORD: ci
+      DB_HOST: localhost
+      DB_PORT: '5432'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt ruff==0.14.2
+
+      # Só erros graves: sintaxe quebrada e nomes que não existem.
+      - name: Lint (ruff)
+        run: ruff check --select E9,F63,F7,F82 --exclude "*/migrations/*" .
+
+      - name: Migrações em dia (nenhum model sem migração)
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Testes automáticos
+        run: python manage.py test --verbosity 2
+
+      - name: Configuração de produção válida
+        env:
+          DEBUG: 'False'
+          SECRET_KEY: ci-chave-so-para-verificacao-${{ github.run_id }}-nao-usar-em-producao
+          ALLOWED_HOSTS: exemplo.test
+          CORS_ALLOWED_ORIGINS: https://exemplo.test
+        run: python manage.py check --deploy --fail-level ERROR
+
+  imagem:
+    name: Imagem Docker (build e push)
+    runs-on: ubuntu-latest
+    needs: lint-e-testes
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      imagem: ${{ steps.nomes.outputs.imagem }}
+      versao: ${{ steps.nomes.outputs.versao }}
+      publicar: ${{ steps.nomes.outputs.publicar }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Nome da imagem e versão
+        id: nomes
+        run: |
+          dono="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "imagem=ghcr.io/${dono}/corelist-backend" >> "$GITHUB_OUTPUT"
+          echo "versao=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" != "pull_request" ] && [ "${GITHUB_REF_NAME}" = "${BRANCH_DE_PRODUCAO}" ]; then
+            echo "publicar=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publicar=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login no GitHub Container Registry
+        if: steps.nomes.outputs.publicar == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Fora do branch de produção, só monta (confere que o Dockerfile funciona).
+      - name: Build e push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ steps.nomes.outputs.publicar == 'true' }}
+          build-args: VERSAO=${{ steps.nomes.outputs.versao }}
+          tags: |
+            ${{ steps.nomes.outputs.imagem }}:latest
+            ${{ steps.nomes.outputs.imagem }}:${{ steps.nomes.outputs.versao }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy no EC2
+    runs-on: ubuntu-latest
+    needs: imagem
+    if: needs.imagem.outputs.publicar == 'true'
+    # O token do job serve para o servidor baixar a imagem do registry.
+    permissions:
+      contents: read
+      packages: read
+    # Um deploy por vez.
+    concurrency:
+      group: deploy-producao
+      cancel-in-progress: false
+    outputs:
+      feito: ${{ steps.deploy.outputs.feito }}
+
+    steps:
+      - name: Atualizar o servidor
+        id: deploy
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          IMAGEM: ${{ needs.imagem.outputs.imagem }}:${{ needs.imagem.outputs.versao }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -z "$EC2_HOST" ] || [ -z "$EC2_USER" ] || [ -z "$EC2_SSH_KEY" ]; then
+            echo "::warning::Segredos EC2_HOST, EC2_USER e EC2_SSH_KEY não configurados: deploy pulado."
+            echo "feito=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          mkdir -p ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+
+          # No servidor: atualiza o código (compose e Caddyfile), baixa a imagem
+          # testada e sobe só o que mudou. O .env do servidor não é tocado.
+          ssh -i ~/.ssh/deploy -o StrictHostKeyChecking=accept-new "$EC2_USER@$EC2_HOST" bash -s <<SCRIPT
+          set -e
+          cd ~/corelist-backend
+          git pull --ff-only origin ${BRANCH_DE_PRODUCAO}
+          cd deploy
+          echo "$TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          export IMAGEM_API="$IMAGEM"
+          docker compose pull api
+          docker compose up -d
+          docker logout ghcr.io
+          docker image prune -f
+          SCRIPT
+
+          rm -f ~/.ssh/deploy
+          echo "feito=true" >> "$GITHUB_OUTPUT"
+
+  smoke:
+    name: Smoke test
+    runs-on: ubuntu-latest
+    needs: [imagem, deploy]
+    if: needs.deploy.outputs.feito == 'true'
+
+    steps:
+      - name: Conferir /api/health/ e a versão no ar
+        env:
+          VERSAO: ${{ needs.imagem.outputs.versao }}
+        run: |
+          # O servidor leva alguns segundos para aplicar migrações e subir.
+          for tentativa in $(seq 1 30); do
+            resposta="$(curl -fsS "${SMOKE_URL}/health/?t=$(date +%s)" || true)"
+            echo "Tentativa ${tentativa}: ${resposta}"
+            if echo "$resposta" | grep -q "\"versao\":\"${VERSAO}\""; then
+              echo "OK: a versão ${VERSAO} está no ar."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::A versão ${VERSAO} não apareceu em ${SMOKE_URL}/health/."
+          exit 1
