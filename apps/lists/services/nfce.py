@@ -14,7 +14,7 @@ loja, e os nomes vêm abreviados ("IOG VIG 800G BATIDO").
 import logging
 import re
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from html import unescape
 from urllib.error import URLError
 from urllib.parse import parse_qs, quote, urlparse
@@ -36,6 +36,8 @@ TAMANHO_MAXIMO = 2 * 1024 * 1024
 CACHE_SEGUNDOS = 60 * 60
 
 FUSO_DA_NOTA = ZoneInfo('America/Manaus')
+
+CENTAVO = Decimal('0.01')
 
 # Unidades da nota que significam venda por peso.
 UNIDADES_PESO = {'KG', 'KGS', 'QUILO'}
@@ -168,7 +170,11 @@ def ler_pagina(html):
         codigo = re.search(r'\d+', _texto(_span(linha, 'RCod')))
         unidade = _texto(_depois_do_rotulo(_span(linha, 'RUN'))).upper()
         quantidade = _decimal(_depois_do_rotulo(_span(linha, 'Rqtd')))
-        preco = _decimal(_depois_do_rotulo(_span(linha, 'RvlUnit')))
+        # Em item por peso, a Sefaz mostra o preço do kg com 10 casas
+        # (total ÷ peso): arredonda para centavos, como na etiqueta.
+        preco = _decimal(_depois_do_rotulo(_span(linha, 'RvlUnit'))).quantize(
+            CENTAVO, rounding=ROUND_HALF_UP,
+        )
         valor = _decimal(_span(linha, 'valor'))
 
         if not nome:

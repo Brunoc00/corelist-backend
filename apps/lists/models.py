@@ -63,9 +63,10 @@ class ListItem(models.Model):
         on_delete=models.PROTECT,
         related_name='list_items',
     )
+    # 3 casas: peso em kg com gramas (0,724 kg), como vem na nota fiscal.
     quantity = models.DecimalField(
         max_digits=10,
-        decimal_places=2,
+        decimal_places=3,
         default=1,
     )
     price = models.DecimalField(

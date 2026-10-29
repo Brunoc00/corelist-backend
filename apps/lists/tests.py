@@ -149,7 +149,7 @@ class ListItemTests(TestCase):
         )
         self.assertEqual(
             response.data['quantity'],
-            '3.00',
+            '3.000',
         )
 
     def test_item_is_by_unit_by_default(self):
@@ -227,7 +227,7 @@ class ListItemTests(TestCase):
         )
         self.assertEqual(
             response.data['quantity'],
-            '2.00',
+            '2.000',
         )
 
     def test_user_can_update_item(self):
@@ -314,7 +314,7 @@ class ListItemTests(TestCase):
         )
         self.assertEqual(
             response.data['quantity'],
-            '2.00',
+            '2.000',
         )
         self.assertEqual(
             response.data['price'],
@@ -446,7 +446,7 @@ class ListItemTests(TestCase):
 
         self.assertEqual(
             history_list['items'][0]['quantity'],
-            '2.00',
+            '2.000',
         )
 
         self.assertEqual(

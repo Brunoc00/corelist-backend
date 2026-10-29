@@ -252,7 +252,7 @@ class NfceLinkSerializer(serializers.Serializer):
 class NfceItemImportSerializer(serializers.Serializer):
     nome = serializers.CharField(max_length=200)
     quantidade = serializers.DecimalField(
-        max_digits=10, decimal_places=2, min_value=Decimal('0.01'),
+        max_digits=10, decimal_places=3, min_value=Decimal('0.001'),
     )
     medida = serializers.ChoiceField(
         choices=[ListItem.MEASURE_UNIT, ListItem.MEASURE_KG],

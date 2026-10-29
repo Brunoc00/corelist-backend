@@ -246,3 +246,47 @@ class NfceApiTests(TestCase):
 
         self.assertEqual(resposta.status_code, 401)
         urlopen.assert_not_called()
+
+
+# Item por peso como a Sefaz mostra: peso com 3 casas e preço do kg com
+# 10 casas (total ÷ peso). Formato da nota de 24/10 que falhou ao salvar.
+PAGINA_PESO = PAGINA.replace(
+    _item(2, 'TOMATE KG', '222', '1,250', 'KG', '7,99', '9,99'),
+    _item(2, 'LING FGO AURORA KG - KG', '7236', '0,724', 'KG', '28,9917127072', '20,99'),
+)
+
+
+class ItemPorPesoTests(TestCase):
+    def test_preco_do_kg_vira_centavos_e_peso_mantem_gramas(self):
+        linguica = ler_pagina(PAGINA_PESO)['itens'][1]
+
+        self.assertEqual(linguica['medida'], 'kg')
+        self.assertEqual(linguica['quantidade'], Decimal('0.724'))
+        self.assertEqual(linguica['preco'], Decimal('28.99'))
+
+    @patch('apps.lists.services.nfce.urlopen')
+    def test_importar_pelo_menu_com_os_itens_da_conferencia(self, urlopen):
+        cache.clear()
+        urlopen.return_value = _resposta(PAGINA_PESO)
+        usuario = User.objects.create_user(
+            email='peso@exemplo.test', password='senha-de-teste-123', first_name='Peso',
+        )
+        client = APIClient()
+        client.force_authenticate(usuario)
+
+        lida = client.post('/api/lists/nfce/ler/', {'link': LINK}, format='json')
+        itens = [
+            {k: item[k] for k in ('nome', 'quantidade', 'medida', 'preco')}
+            for item in lida.data['itens']
+        ]
+        resposta = client.post(
+            '/api/lists/nfce/importar/', {'link': LINK, 'itens': itens}, format='json',
+        )
+
+        self.assertEqual(resposta.status_code, 201, resposta.data)
+        linguica = List.objects.get(id=resposta.data['id']).items.get(
+            product__name='LING FGO AURORA KG - KG',
+        )
+        self.assertEqual(linguica.quantity, Decimal('0.724'))
+        self.assertEqual(linguica.price, Decimal('28.99'))
+        self.assertAlmostEqual(linguica.subtotal, Decimal('20.99'), delta=Decimal('0.01'))
