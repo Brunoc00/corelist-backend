@@ -18,6 +18,7 @@ from .serializers import (
     ListSerializer,
     ListSummarySerializer,
 )
+from .services.busca import buscar
 from .services.insights import generate_insights
 
 
@@ -383,3 +384,12 @@ class ListPromotionsView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+class ProdutoBuscaView(APIView):
+    """GET lists/produtos/?q=arr: produtos para adicionar à lista, com o
+    último preço que a pessoa pagou. Sem q, os que ela mais compra."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(buscar(request.user, request.query_params.get('q', '')))
