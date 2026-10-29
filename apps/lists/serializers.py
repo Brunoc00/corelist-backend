@@ -271,3 +271,33 @@ class NfceImportSerializer(NfceLinkSerializer):
         if not itens:
             raise serializers.ValidationError('Informe ao menos um item.')
         return itens
+
+
+class NfceEscolhaSerializer(serializers.Serializer):
+    """O que a pessoa confirmou para um item da nota, na conferência."""
+
+    indice = serializers.IntegerField(min_value=0)
+    # Item da lista que corresponde a este item da nota (ou nenhum: fora da lista).
+    list_item = serializers.IntegerField(required=False, allow_null=True)
+    # Produto do catálogo, para itens fora da lista (ou nenhum: cria pelo nome).
+    produto = serializers.IntegerField(required=False, allow_null=True)
+    nome = serializers.CharField(max_length=200, required=False, allow_blank=True)
+
+
+class NfceConcluirNaListaSerializer(NfceLinkSerializer):
+    itens = NfceEscolhaSerializer(many=True)
+
+    def validate_itens(self, itens):
+        if not itens:
+            raise serializers.ValidationError('Informe ao menos um item da nota.')
+
+        indices = [item['indice'] for item in itens]
+        if len(indices) != len(set(indices)):
+            raise serializers.ValidationError('Item da nota repetido.')
+
+        ligados = [item['list_item'] for item in itens if item.get('list_item')]
+        if len(ligados) != len(set(ligados)):
+            raise serializers.ValidationError(
+                'Um item da lista foi ligado a dois itens da nota.'
+            )
+        return itens

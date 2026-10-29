@@ -127,6 +127,21 @@ def _depois_do_rotulo(html):
     return html.split('</strong>')[-1]
 
 
+def _endereco(html):
+    """'Avenida - Rodrigo Otavio , 2595 , , Crespo , Manaus , AM'
+    -> 'Avenida Rodrigo Otavio, 2595, Crespo, Manaus, AM'."""
+    topo = re.search(r'class="txtCenter">(.*?)</table>', html, re.S)
+    blocos = re.findall(r'<div class="text">(.*?)</div>', topo.group(1) if topo else '', re.S)
+
+    for bloco in blocos:
+        texto = _texto(bloco)
+        if texto and not texto.startswith('CNPJ'):
+            partes = [parte.strip() for parte in texto.split(',') if parte.strip()]
+            return re.sub(r'\s+-\s+', ' ', ', '.join(partes))[:300]
+
+    return ''
+
+
 def ler_pagina(html):
     """Lê a página da nota. Itens iguais (mesmo código e preço) são somados."""
     if 'tabResult' not in html:
@@ -136,6 +151,7 @@ def ler_pagina(html):
 
     loja = re.search(r'class="txtTopo"[^>]*>(.*?)</div>', html, re.S)
     cnpj = re.search(r'CNPJ:\s*([\d./-]+)', _texto(html))
+    endereco = _endereco(html)
     emissao = re.search(
         r'Emiss\S*o:\s*(\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2})', _texto(html),
     )
@@ -190,6 +206,7 @@ def ler_pagina(html):
     return {
         'loja': _texto(loja.group(1)) if loja else '',
         'cnpj': cnpj.group(1) if cnpj else '',
+        'endereco': endereco,
         'emitida_em': data,
         'total': _decimal(total.group(1)) if total else sum(
             (item['total'] for item in itens), Decimal('0'),
