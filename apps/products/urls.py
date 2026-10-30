@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     CategoryListCreateView,
+    ProductBarcodeView,
     ProductDetailView,
     ProductListCreateView,
     ProductLookupView,
@@ -9,6 +10,11 @@ from .views import (
 
 
 urlpatterns = [
+    path(
+        '<int:pk>/codigo-de-barras/',
+        ProductBarcodeView.as_view(),
+        name='product-barcode',
+    ),
     path(
         'categories/',
         CategoryListCreateView.as_view(),

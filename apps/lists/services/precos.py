@@ -15,6 +15,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from apps.products.models import ObservedPrice, Product, Store
+from apps.products.services.redes import rede_da_loja
 
 from .busca import pontuar
 from .reconhecer import somente_digitos
@@ -59,7 +60,15 @@ def registrar_preco(loja, nota, item, produto):
 # --- Consultar -----------------------------------------------------------
 
 def _loja_json(loja):
-    return {'id': loja.id, 'nome': loja.name, 'endereco': loja.address}
+    marca, icone = rede_da_loja(loja.name)
+    return {
+        'id': loja.id,
+        'nome': loja.name,
+        # Nome que as pessoas conhecem ("Assaí Atacadista") e o ícone da rede.
+        'marca': marca,
+        'icone': icone,
+        'endereco': loja.address,
+    }
 
 
 def _preco_json(observado, agora):
