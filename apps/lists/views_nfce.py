@@ -4,6 +4,8 @@
 - POST lists/nfce/importar/ {link, nome?, itens?} -> cria a compra concluída.
 """
 
+from decimal import Decimal
+
 from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -22,6 +24,7 @@ from .serializers import (
     NfceLinkSerializer,
 )
 from .services.nfce import LinkInvalido, NfceErro, ler_nota
+from .services.precos import registrar_preco
 from .services.reconhecer import (
     aprender,
     cruzar_com_lista,
@@ -122,7 +125,7 @@ class NfceImportarView(APIView):
 
         try:
             with transaction.atomic():
-                loja_da_nota(nota)
+                loja = loja_da_nota(nota)
                 lista = List.objects.create(
                     owner=request.user,
                     name=nome[:200],
@@ -132,6 +135,7 @@ class NfceImportarView(APIView):
                     completed_at=emitida_em,
                 )
 
+                livres = list(nota['itens'])
                 for item in itens:
                     nome_item = item['nome'].strip()[:200]
                     produto = _produto_do_catalogo(nome_item) or Product.objects.create(
@@ -146,6 +150,22 @@ class NfceImportarView(APIView):
                         price=item['preco'],
                         is_completed=True,
                     )
+
+                    # Para os preços da cidade, vale o item da nota (lido no
+                    # servidor) com a mesma quantidade, medida e preço.
+                    da_nota = next(
+                        (
+                            livre for livre in livres
+                            if livre['medida'] == item['medida']
+                            and livre['preco'] == item['preco']
+                            and abs(livre['quantidade'] - item['quantidade']) < Decimal('0.001')
+                        ),
+                        None,
+                    )
+                    if da_nota is not None:
+                        livres.remove(da_nota)
+                        aprender(loja, da_nota, produto)
+                        registrar_preco(loja, nota, da_nota, produto)
         except IntegrityError:
             # Duas importações da mesma nota ao mesmo tempo.
             return _erro('Esta nota já foi importada.', status.HTTP_409_CONFLICT)
@@ -307,6 +327,7 @@ class NfceConcluirNaListaView(APIView):
                         )
 
                     aprender(loja, item, produto)
+                    registrar_preco(loja, nota, item, produto)
 
                 # Esquecidos: ficam na lista como "não comprado", sem preço.
                 esquecidos = [

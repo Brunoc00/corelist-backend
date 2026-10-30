@@ -122,3 +122,44 @@ class StoreProductCode(models.Model):
 
     def __str__(self):
         return f'{self.store_id}:{self.store_code} -> {self.product_id}'
+
+
+class ObservedPrice(models.Model):
+    """Preço que apareceu numa nota fiscal: base dos preços da cidade.
+
+    Não guarda quem comprou, só loja, produto, preço e data da nota. A mesma
+    nota importada por duas pessoas não duplica o preço.
+    """
+
+    MEASURE_UNIT = 'unit'
+    MEASURE_KG = 'kg'
+
+    product = models.ForeignKey(
+        Product, on_delete=models.CASCADE, related_name='observed_prices',
+    )
+    store = models.ForeignKey(
+        Store, on_delete=models.CASCADE, related_name='observed_prices',
+    )
+    store_code = models.CharField(max_length=60, blank=True, default='')
+    # Preço da unidade, ou do kg quando measure = 'kg'.
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    measure = models.CharField(max_length=10, default=MEASURE_UNIT)
+    # Data de emissão da nota (quando o preço valia).
+    observed_at = models.DateTimeField()
+    nfce_key = models.CharField(max_length=44)
+    imported_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['product', '-observed_at']),
+            models.Index(fields=['store', 'product', '-observed_at']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['nfce_key', 'product', 'store_code', 'price'],
+                name='preco_unico_por_nota',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.product_id} @ {self.store_id}: {self.price} ({self.observed_at:%d/%m/%Y})'

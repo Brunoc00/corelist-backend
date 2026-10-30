@@ -173,6 +173,8 @@ jobs:
           echo "$TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           export IMAGEM_API="$IMAGEM"
           docker compose pull api
+          # Migrações e notas antigas nos preços da cidade (não duplica).
+          docker compose run --rm api sh -c "python manage.py migrate --noinput && python manage.py registrar_precos_antigos"
           docker compose up -d
           docker logout ghcr.io
           docker image prune -f

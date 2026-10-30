@@ -9,6 +9,7 @@ from .views import (ListDetailView, ListListCreateView, ListItemListCreateView,
                     ListPromotionsView,
                     ProdutoBuscaView,
                     )
+from .views_precos import PrecosBuscaView, PrecosDaListaView, PrecosProdutoView
 from .views_nfce import (
     NfceConcluirNaListaView,
     NfceImportarView,
@@ -28,6 +29,9 @@ urlpatterns = [
     path('insights/',ListInsightsView.as_view(),name='list-insights',),
     path('promotions/',ListPromotionsView.as_view(),name='list-promotions',),
     path('produtos/', ProdutoBuscaView.as_view(), name='produto-busca'),
+    path('precos/', PrecosBuscaView.as_view(), name='precos-busca'),
+    path('precos/produto/<int:pk>/', PrecosProdutoView.as_view(), name='precos-produto'),
+    path('<int:pk>/precos/', PrecosDaListaView.as_view(), name='lista-precos'),
     path('nfce/ler/', NfceLerView.as_view(), name='nfce-ler'),
     path('nfce/importar/', NfceImportarView.as_view(), name='nfce-importar'),
     path('<int:pk>/nfce/ler/', NfceLerNaListaView.as_view(), name='lista-nfce-ler'),
