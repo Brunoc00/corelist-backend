@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.db import transaction
 from django.db.models import F, Sum
 from django.db.models.functions import Coalesce, TruncMonth
 from django.shortcuts import get_object_or_404
@@ -393,3 +394,56 @@ class ProdutoBuscaView(APIView):
 
     def get(self, request):
         return Response(buscar(request.user, request.query_params.get('q', '')))
+
+
+class ListRepetirView(APIView):
+    """POST lists/<id>/repetir/ {nome?, itens?: [ids]}: cria uma lista nova
+    em andamento com os produtos de uma compra (a próxima compra).
+
+    Copia produto, quantidade e medida; o preço pago vira o preço planejado.
+    Sem `itens`, copia todos os itens comprados.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        origem = get_object_or_404(List, pk=pk, owner=request.user)
+
+        ids = request.data.get('itens')
+        itens = origem.items.select_related('product').order_by('id')
+        if ids is None:
+            itens = itens.filter(is_completed=True)
+        else:
+            if not isinstance(ids, list) or not all(isinstance(i, int) for i in ids):
+                return Response(
+                    {'detail': 'Informe os itens como uma lista de números.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            itens = itens.filter(id__in=ids)
+
+        itens = list(itens)
+        if not itens:
+            return Response(
+                {'detail': 'Escolha ao menos um produto para a próxima lista.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        nome = str(request.data.get('nome') or '').strip()[:200] or 'Próxima compra'
+
+        with transaction.atomic():
+            nova = List.objects.create(owner=request.user, name=nome, budget=origem.budget)
+            ListItem.objects.bulk_create([
+                ListItem(
+                    list=nova,
+                    product=item.product,
+                    quantity=item.quantity,
+                    measure=item.measure,
+                    price=item.price,
+                )
+                for item in itens
+            ])
+
+        return Response(
+            ListSerializer(nova, context={'request': request}).data,
+            status=status.HTTP_201_CREATED,
+        )
