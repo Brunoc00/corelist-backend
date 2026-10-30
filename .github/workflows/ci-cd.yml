@@ -174,7 +174,8 @@ jobs:
           export IMAGEM_API="$IMAGEM"
           docker compose pull api
           # Migrações e notas antigas nos preços da cidade (não duplica).
-          docker compose run --rm api sh -c "python manage.py migrate --noinput && python manage.py registrar_precos_antigos"
+          # -T e </dev/null: sem isso o run lê o resto deste script e o "up" não roda.
+          docker compose run --rm -T api sh -c "python manage.py migrate --noinput && python manage.py registrar_precos_antigos" </dev/null
           docker compose up -d
           docker logout ghcr.io
           docker image prune -f
