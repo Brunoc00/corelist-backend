@@ -290,3 +290,16 @@ class ItemPorPesoTests(TestCase):
         self.assertEqual(linguica.quantity, Decimal('0.724'))
         self.assertEqual(linguica.price, Decimal('28.99'))
         self.assertAlmostEqual(linguica.subtotal, Decimal('20.99'), delta=Decimal('0.01'))
+
+
+class EnderecoDaLojaTests(TestCase):
+    def test_tira_campo_nao_informado(self):
+        pagina = PAGINA.replace(
+            'Rua Exemplo, 100, Centro, Manaus, AM',
+            'RUA MARIA ANDRADE, 352, NAO INFORMADO, SAO LAZARO, MANAUS, AM',
+        )
+
+        self.assertEqual(
+            ler_pagina(pagina)['endereco'],
+            'RUA MARIA ANDRADE, 352, SAO LAZARO, MANAUS, AM',
+        )

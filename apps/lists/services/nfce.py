@@ -39,6 +39,8 @@ FUSO_DA_NOTA = ZoneInfo('America/Manaus')
 
 CENTAVO = Decimal('0.01')
 
+VAZIOS_DO_ENDERECO = {'NAO INFORMADO', 'NÃO INFORMADO', 'SEM COMPLEMENTO'}
+
 # Unidades da nota que significam venda por peso.
 UNIDADES_PESO = {'KG', 'KGS', 'QUILO'}
 
@@ -138,7 +140,11 @@ def _endereco(html):
     for bloco in blocos:
         texto = _texto(bloco)
         if texto and not texto.startswith('CNPJ'):
-            partes = [parte.strip() for parte in texto.split(',') if parte.strip()]
+            # A nota preenche campo vazio com "NAO INFORMADO": não vai para o mapa.
+            partes = [
+                parte.strip() for parte in texto.split(',')
+                if parte.strip() and parte.strip().upper() not in VAZIOS_DO_ENDERECO
+            ]
             return re.sub(r'\s+-\s+', ' ', ', '.join(partes))[:300]
 
     return ''

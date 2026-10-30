@@ -10,7 +10,9 @@ compra. Pode rodar mais de uma vez: não duplica.
 from django.core.management.base import BaseCommand
 
 from apps.lists.models import List
+from apps.lists.services.nfce import VAZIOS_DO_ENDERECO
 from apps.lists.services.precos import loja_pela_chave, registrar_preco
+from apps.products.models import Store
 
 
 class Command(BaseCommand):
@@ -33,5 +35,13 @@ class Command(BaseCommand):
                     'medida': item.measure,
                 }, item.product)
                 total += 1
+
+        # Endereços lidos antes de 30/10 podiam ter "NAO INFORMADO" no meio.
+        for loja in Store.objects.filter(address__icontains='INFORMADO'):
+            loja.address = ', '.join(
+                parte.strip() for parte in loja.address.split(',')
+                if parte.strip() and parte.strip().upper() not in VAZIOS_DO_ENDERECO
+            )
+            loja.save(update_fields=['address', 'updated_at'])
 
         self.stdout.write(self.style.SUCCESS(f'Itens verificados: {total}.'))
