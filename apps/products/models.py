@@ -99,6 +99,11 @@ class Store(models.Model):
     cnpj = models.CharField(max_length=14, unique=True)  # só dígitos
     name = models.CharField(max_length=200)
     address = models.CharField(max_length=300, blank=True, default='')
+    # Coordenadas do endereço (OpenStreetMap), para "lojas perto de mim".
+    # geocoded_at marca a tentativa, mesmo sem resultado: não repete à toa.
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
+    geocoded_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

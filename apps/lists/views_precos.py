@@ -1,6 +1,6 @@
 """Preços da cidade (docs/PLANO_PRECOS_DA_CIDADE.md).
 
-- GET lists/precos/?q=arroz&dias=30   -> produtos com o mais barato agora e o
+- GET lists/precos/?q=arroz&dias=30[&lat=&lng=&raio=5] -> produtos com o mais barato agora e o
                                          menor preço do período;
 - GET lists/precos/produto/<id>/?dias -> preço atual em cada loja;
 - GET lists/<id>/precos/              -> para a lista em andamento: mais
@@ -17,17 +17,29 @@ from rest_framework.views import APIView
 from apps.products.models import Product
 
 from .models import List
-from .services.precos import buscar_precos, periodo, precos_da_lista, resumo_do_produto
+from .services.precos import (
+    buscar_precos,
+    localizacao,
+    periodo,
+    precos_da_lista,
+    raio,
+    resumo_do_produto,
+)
 
 
 class PrecosBuscaView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        dias = periodo(request.query_params.get('dias'))
+        params = request.query_params
+        dias = periodo(params.get('dias'))
+        # Perto de mim: lat/lng do aparelho (opcional) e raio em km (2, 5, 10).
+        origem = localizacao(params.get('lat'), params.get('lng'))
+        raio_km = raio(params.get('raio')) if origem else None
         return Response({
             'dias': dias,
-            'produtos': buscar_precos(request.query_params.get('q', ''), dias),
+            'raio_km': raio_km,
+            'produtos': buscar_precos(params.get('q', ''), dias, origem=origem, raio_km=raio_km),
         })
 
 

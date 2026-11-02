@@ -8,6 +8,7 @@ Regras (docs/PLANO_PRECOS_DA_CIDADE.md):
 - ninguém vê quem comprou: só loja, preço e data.
 """
 
+import time
 from datetime import timedelta
 from decimal import Decimal
 
@@ -15,6 +16,11 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from apps.products.models import ObservedPrice, Product, Store
+from apps.products.services.geocodificar import (
+    PAUSA_ENTRE_CONSULTAS,
+    distancia_km,
+    geocodificar_loja,
+)
 from apps.products.services.redes import rede_da_loja
 
 from .busca import pontuar
@@ -24,6 +30,9 @@ from .reconhecer import somente_digitos
 VALIDADE_DO_PRECO = timedelta(days=1)
 PERIODOS = (7, 30, 90)
 PERIODO_PADRAO = 30
+RAIOS_KM = (2, 5, 10)
+# Lojas sem coordenadas consultadas no OpenStreetMap por busca (1 por segundo).
+GEOCODIFICAR_POR_BUSCA = 3
 
 
 def periodo(valor):
@@ -57,11 +66,36 @@ def registrar_preco(loja, nota, item, produto):
         pass
 
 
+def localizacao(lat, lng):
+    """(lat, lng) de parâmetros da URL, ou None se faltar ou for inválido."""
+    try:
+        lat, lng = float(lat), float(lng)
+    except (TypeError, ValueError):
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return None
+    return lat, lng
+
+
+def raio(valor):
+    try:
+        km = int(valor)
+    except (TypeError, ValueError):
+        return None
+    return km if km in RAIOS_KM else None
+
+
 # --- Consultar -----------------------------------------------------------
 
-def _loja_json(loja):
+def _distancia(loja, origem):
+    if origem is None or loja.latitude is None or loja.longitude is None:
+        return None
+    return round(distancia_km(origem, (loja.latitude, loja.longitude)), 1)
+
+
+def _loja_json(loja, origem=None):
     marca, icone = rede_da_loja(loja.name)
-    return {
+    dados = {
         'id': loja.id,
         'nome': loja.name,
         # Nome que as pessoas conhecem ("Assaí Atacadista") e o ícone da rede.
@@ -69,11 +103,27 @@ def _loja_json(loja):
         'icone': icone,
         'endereco': loja.address,
     }
+    if origem is not None:
+        dados['distancia_km'] = _distancia(loja, origem)
+    return dados
 
 
-def _preco_json(observado, agora):
+def _geocodificar_faltantes(lojas):
+    """Busca as coordenadas de algumas lojas que ainda não têm (as demais
+    ficam para as próximas buscas ou para o comando geocodificar_lojas)."""
+    faltam = [
+        loja for loja in lojas
+        if loja.latitude is None and loja.geocoded_at is None and loja.address
+    ][:GEOCODIFICAR_POR_BUSCA]
+    for indice, loja in enumerate(faltam):
+        if indice:
+            time.sleep(PAUSA_ENTRE_CONSULTAS)
+        geocodificar_loja(loja)
+
+
+def _preco_json(observado, agora, origem=None):
     return {
-        'loja': _loja_json(observado.store),
+        'loja': _loja_json(observado.store, origem),
         'preco': str(observado.price),
         'medida': observado.measure,
         'data': observado.observed_at,
@@ -100,13 +150,22 @@ def ultimos_por_loja(produto_ids, medida=None):
     return ultimos
 
 
-def resumo_do_produto(produto, dias=PERIODO_PADRAO, ultimos=None):
-    """Preço atual em cada loja, o mais barato agora e o menor do período."""
+def resumo_do_produto(produto, dias=PERIODO_PADRAO, ultimos=None, origem=None, raio_km=None):
+    """Preço atual em cada loja, o mais barato agora e o menor do período.
+
+    Com a localização (origem), cada loja traz a distância; com um raio, só
+    ficam as lojas até essa distância (as sem coordenadas ficam de fora)."""
     agora = timezone.now()
     if ultimos is None:
         ultimos = ultimos_por_loja([produto.id]).get(produto.id, {})
 
-    lojas = [_preco_json(observado, agora) for observado in ultimos.values()]
+    lojas = [_preco_json(observado, agora, origem) for observado in ultimos.values()]
+    if origem is not None and raio_km:
+        lojas = [
+            linha for linha in lojas
+            if linha['loja']['distancia_km'] is not None
+            and linha['loja']['distancia_km'] <= raio_km
+        ]
     # Atuais primeiro, do mais barato ao mais caro; depois os desatualizados.
     lojas.sort(key=lambda linha: (linha['desatualizado'], Decimal(linha['preco'])))
 
@@ -134,7 +193,7 @@ def resumo_do_produto(produto, dias=PERIODO_PADRAO, ultimos=None):
             None if menor is None else {
                 'preco': str(menor.price),
                 'medida': menor.measure,
-                'loja': _loja_json(menor.store),
+                'loja': _loja_json(menor.store, origem),
                 'data': menor.observed_at,
                 'dias': dias,
             }
@@ -143,8 +202,9 @@ def resumo_do_produto(produto, dias=PERIODO_PADRAO, ultimos=None):
     }
 
 
-def buscar_precos(texto, dias=PERIODO_PADRAO, limite=10):
-    """Produtos com preço da cidade que combinam com o texto."""
+def buscar_precos(texto, dias=PERIODO_PADRAO, limite=10, origem=None, raio_km=None):
+    """Produtos com preço da cidade que combinam com o texto (com origem e
+    raio: só as lojas perto da pessoa, com a distância)."""
     texto = (texto or '').strip()
     com_preco = Product.objects.filter(observed_prices__isnull=False).distinct()
 
@@ -165,10 +225,21 @@ def buscar_precos(texto, dias=PERIODO_PADRAO, limite=10):
         produtos = [por_id[pid] for pid in ids if pid in por_id]
 
     ultimos = ultimos_por_loja([produto.id for produto in produtos])
-    return [
-        resumo_do_produto(produto, dias, ultimos.get(produto.id, {}))
+    if origem is not None:
+        _geocodificar_faltantes({
+            observado.store_id: observado.store
+            for por_loja in ultimos.values()
+            for observado in por_loja.values()
+        }.values())
+
+    resumos = [
+        resumo_do_produto(produto, dias, ultimos.get(produto.id, {}), origem, raio_km)
         for produto in produtos
     ]
+    if origem is not None and raio_km:
+        # Perto de mim: só produtos com alguma loja dentro do raio.
+        resumos = [resumo for resumo in resumos if resumo['lojas']]
+    return resumos
 
 
 def precos_da_lista(lista):

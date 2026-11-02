@@ -197,7 +197,16 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
+    # Só o assistente usa limite (cada pergunta custa uma chamada ao Claude).
+    'DEFAULT_THROTTLE_RATES': {
+        'assistente': os.getenv('ASSISTENTE_LIMITE', '30/hour'),
+    },
 }
+
+# Assistente de preços (chat do Início): Claude, da Anthropic. A chave vem de
+# ANTHROPIC_API_KEY no ambiente; sem ela, o assistente responde com frases
+# prontas a partir dos mesmos dados.
+ASSISTENTE_MODELO = os.getenv('ANTHROPIC_MODEL', 'claude-opus-5-5')
 
 
 # JWT
@@ -232,6 +241,12 @@ if not DEBUG:
 
 
 # Open Food Facts exige um User-Agent que identifique o app.
+
+# OpenStreetMap (Nominatim) exige um User-Agent que identifique o app.
+GEOCODER_USER_AGENT = os.getenv(
+    'GEOCODER_USER_AGENT',
+    'CompraFacil/1.0 (+https://github.com/jvxp34/corelist-frontend-v2)',
+)
 
 OPEN_FOOD_FACTS_USER_AGENT = os.getenv(
     'OPEN_FOOD_FACTS_USER_AGENT',
