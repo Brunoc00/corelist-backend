@@ -6,6 +6,7 @@ from rest_framework_simplejwt.views import (
 )
 
 from .views import MeView, RegisterView
+from .views_senha import EsqueciSenhaView, RedefinirSenhaView
 
 urlpatterns = [
     path('register/', RegisterView.as_view(), name='register'),
@@ -14,4 +15,7 @@ urlpatterns = [
     path('me/', MeView.as_view(), name='me'),
     # Sair: invalida o refresh no servidor.
     path('logout/', TokenBlacklistView.as_view(), name='logout'),
+    # Esqueci a senha (e-mail com link) e criar a senha nova.
+    path('senha/esqueci/', EsqueciSenhaView.as_view(), name='senha-esqueci'),
+    path('senha/redefinir/', RedefinirSenhaView.as_view(), name='senha-redefinir'),
 ]

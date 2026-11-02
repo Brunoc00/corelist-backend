@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import unicodedata
+from urllib.parse import urlencode
 from decimal import Decimal
 
 import anthropic
@@ -246,6 +247,86 @@ def responder_com_gemini(mensagens, origem=None):
     return (resposta.text or '').strip() or None
 
 
+# --- Gemini pela internet (Google Maps + busca no Google) -------------------
+
+SISTEMA_INTERNET = """Você é o assistente de compras do CompraFácil, um app de lista de compras de Manaus (AM).
+A pessoa pergunta onde comprar algo mais barato. Responda pelo que ela perguntou, usando:
+- o Google Maps para achar supermercados e atacarejos perto da localização dela (nome, bairro e distância aproximada);
+- a busca do Google para preços e promoções publicados (encartes, sites e redes sociais dos mercados de Manaus).
+
+Regras:
+- Nunca invente preço. Preço da internet: diga de onde veio e que pode ter mudado ou valer só na promoção.
+- Se não achar preço do produto, diga isso e indique os 2 ou 3 mercados mais próximos que costumam ter preço baixo (atacarejos), para a pessoa conferir.
+- Se o contexto trouxer "preços de notas fiscais" do app, cite-os como um extra ("visto numa nota fiscal em DD/MM"), sem depender deles.
+- Responda em português do Brasil, em poucas frases ou uma lista curta, sem tabelas. Sem links no texto: as fontes aparecem separadas no app.
+- Assuntos fora de compras e preços: responda em uma frase que você só ajuda com compras."""
+
+
+def _fontes(resposta):
+    """Links que o Google exige mostrar junto da resposta (Maps e busca)."""
+    fontes, vistos = [], set()
+    for candidato in (getattr(resposta, 'candidates', None) or [])[:1]:
+        metadados = getattr(candidato, 'grounding_metadata', None)
+        for trecho in (getattr(metadados, 'grounding_chunks', None) or []):
+            for tipo in ('maps', 'web'):
+                origem = getattr(trecho, tipo, None)
+                url = getattr(origem, 'uri', None)
+                if origem and url and url not in vistos:
+                    vistos.add(url)
+                    fontes.append({'tipo': tipo, 'titulo': origem.title or url, 'url': url})
+        for consulta in (getattr(metadados, 'web_search_queries', None) or [])[:3]:
+            url = 'https://www.google.com/search?' + urlencode({'q': consulta})
+            if url not in vistos:
+                vistos.add(url)
+                fontes.append({'tipo': 'busca', 'titulo': consulta, 'url': url})
+    return fontes[:8]
+
+
+def responder_com_gemini_na_internet(mensagens, origem=None):
+    """{'texto', 'fontes'}: Gemini com Google Maps (lojas perto da pessoa) e
+    busca no Google (promoções). Os preços das notas vão só como extra."""
+    termo = termo_da_pergunta(mensagens[-1]['content'])
+    notas = resultado_da_busca(termo, 30, origem)['produtos'] if termo else []
+    onde = (
+        f'Localização da pessoa: latitude {origem[0]:.3f}, longitude {origem[1]:.3f} (Manaus).'
+        if origem else 'A pessoa está em Manaus (localização exata não informada).'
+    )
+    contexto = (
+        f'\n\n{onde}\nData de hoje: {timezone.localdate():%d/%m/%Y}.'
+        '\nPreços de notas fiscais do app (extra, pode estar vazio): '
+        + json.dumps(notas, ensure_ascii=False, default=str)
+    )
+
+    ferramentas = [
+        tipos_gemini.Tool(google_maps=tipos_gemini.GoogleMaps()),
+        tipos_gemini.Tool(google_search=tipos_gemini.GoogleSearch()),
+    ]
+    config_ferramentas = None
+    if origem:
+        config_ferramentas = tipos_gemini.ToolConfig(
+            retrieval_config=tipos_gemini.RetrievalConfig(
+                lat_lng=tipos_gemini.LatLng(latitude=origem[0], longitude=origem[1]),
+                language_code='pt_BR',
+            ),
+        )
+
+    resposta = _cliente_gemini().models.generate_content(
+        model=settings.ASSISTENTE_MODELO_GEMINI,
+        contents=[
+            {'role': 'user' if m['role'] == 'user' else 'model', 'parts': [{'text': m['content']}]}
+            for m in mensagens
+        ],
+        config=tipos_gemini.GenerateContentConfig(
+            system_instruction=SISTEMA_INTERNET + contexto,
+            tools=ferramentas,
+            tool_config=config_ferramentas,
+            max_output_tokens=2000,
+        ),
+    )
+    texto = (resposta.text or '').strip()
+    return {'texto': texto, 'fontes': _fontes(resposta)} if texto else None
+
+
 # --- Sem IA (sem chave ou com erro) ----------------------------------------
 
 PALAVRAS_DE_PERGUNTA = {
@@ -308,6 +389,17 @@ def responder_sem_ia(pergunta, origem=None):
 
 # --- Entrada -----------------------------------------------------------------
 
+def _com_gemini_na_internet(mensagens, origem):
+    try:
+        return responder_com_gemini_na_internet(mensagens, origem)
+    except erros_gemini.APIError as erro:
+        # Ex.: chave no plano gratuito, sem Maps/busca: usa o modo das notas.
+        logger.warning('Assistente: Gemini com Maps/busca falhou: %s', erro)
+    except Exception:
+        logger.exception('Assistente: falha no Gemini com Maps/busca.')
+    return None
+
+
 def _com_gemini(mensagens, origem):
     try:
         return responder_com_gemini(mensagens, origem)
@@ -330,6 +422,8 @@ def ias_disponiveis():
     """[(fonte, função)] das IAs com chave, na ordem de preferência."""
     ias = []
     if os.getenv('GEMINI_API_KEY'):
+        if settings.ASSISTENTE_INTERNET:
+            ias.append(('gemini', _com_gemini_na_internet))
         ias.append(('gemini', _com_gemini))
     if os.getenv('ANTHROPIC_API_KEY'):
         ias.append(('claude', _com_claude))
@@ -339,13 +433,15 @@ def ias_disponiveis():
 
 
 def responder(mensagens, origem=None):
-    """{'resposta': texto, 'fonte': 'gemini' | 'claude' | 'sem_ia'}."""
+    """{'resposta', 'fonte': 'gemini' | 'claude' | 'sem_ia', 'fontes': [links]}."""
     convertidas = preparar_mensagens(mensagens)
     pergunta = convertidas[-1]['content']
 
     for fonte, responder_com_ia in ias_disponiveis():
-        texto = responder_com_ia(convertidas, origem)
-        if texto:
-            return {'resposta': texto, 'fonte': fonte}
+        saida = responder_com_ia(convertidas, origem)
+        if isinstance(saida, dict):
+            return {'resposta': saida['texto'], 'fonte': fonte, 'fontes': saida['fontes']}
+        if saida:
+            return {'resposta': saida, 'fonte': fonte, 'fontes': []}
 
-    return {'resposta': responder_sem_ia(pergunta, origem), 'fonte': 'sem_ia'}
+    return {'resposta': responder_sem_ia(pergunta, origem), 'fonte': 'sem_ia', 'fontes': []}

@@ -88,7 +88,7 @@ class AssistenteTests(TestCase):
 
         resposta = self.perguntar('Onde o arroz está mais barato?')
 
-        self.assertEqual(resposta.data, {'resposta': 'O arroz está mais barato no Assaí.', 'fonte': 'claude'})
+        self.assertEqual(resposta.data, {'resposta': 'O arroz está mais barato no Assaí.', 'fonte': 'claude', 'fontes': []})
         self.assertEqual(criar.call_count, 2)
         primeira = criar.call_args_list[0].kwargs
         self.assertEqual(primeira['model'], 'claude-opus-5-5')
@@ -148,6 +148,7 @@ class AssistenteTests(TestCase):
             self.assertEqual(self.perguntar('arroz').status_code, 429)
 
 
+@override_settings(ASSISTENTE_INTERNET=False)
 class AssistenteGeminiTests(TestCase):
     def setUp(self):
         cache.clear()
@@ -176,7 +177,8 @@ class AssistenteGeminiTests(TestCase):
 
         resposta = self.perguntar()
 
-        self.assertEqual(resposta.data, {'resposta': 'Arroz mais barato: R$ 24,90 no Assaí.', 'fonte': 'gemini'})
+        self.assertEqual(resposta.data['resposta'], 'Arroz mais barato: R$ 24,90 no Assaí.')
+        self.assertEqual(resposta.data['fonte'], 'gemini')
         self.assertEqual(vistos['model'], 'gemini-3.8-flash')
         self.assertEqual(vistos['contents'][-1]['role'], 'user')
         self.assertEqual(vistos['dados']['produtos'][0]['lojas'][0]['preco'], '24.90')
@@ -205,7 +207,7 @@ class AssistenteGeminiTests(TestCase):
     def test_se_o_gemini_falha_tenta_o_claude(self, gemini, claude):
         gemini.return_value.models.generate_content.side_effect = RuntimeError('cota esgotada')
         claude.return_value.beta.messages.create.return_value = _resposta([_texto('pelo Claude')])
-        self.assertEqual(self.perguntar().data, {'resposta': 'pelo Claude', 'fonte': 'claude'})
+        self.assertEqual(self.perguntar().data, {'resposta': 'pelo Claude', 'fonte': 'claude', 'fontes': []})
 
     @patch.dict('os.environ', {'GEMINI_API_KEY': 'chave-de-teste', 'ANTHROPIC_API_KEY': ''})
     @patch('apps.lists.services.assistente._cliente_gemini')
@@ -214,3 +216,73 @@ class AssistenteGeminiTests(TestCase):
         resposta = self.perguntar()
         self.assertEqual(resposta.data['fonte'], 'sem_ia')
         self.assertIn('R$ 24,90', resposta.data['resposta'])
+
+
+class AssistenteNaInternetTests(TestCase):
+    """Gemini com Google Maps e busca no Google (o padrão com GEMINI_API_KEY)."""
+
+    def setUp(self):
+        cache.clear()
+        usuario = User.objects.create_user(email='internet@exemplo.test', password='senha-de-teste-123')
+        self.client = APIClient()
+        self.client.force_authenticate(usuario)
+        loja = Store.objects.create(cnpj='06057223044209', name='SENDAS DISTRIBUIDORA S/A')
+        _preco(Product.objects.create(name='Arroz Camil tipo 1'), loja, '24.90')
+
+    def perguntar(self, **extra):
+        dados = {'mensagens': [{'papel': 'usuario', 'texto': 'Onde tem arroz mais barato perto de mim?'}], **extra}
+        return self.client.post(URL, dados, format='json')
+
+    def resposta_com_fontes(self, texto):
+        metadados = SimpleNamespace(
+            grounding_chunks=[
+                SimpleNamespace(maps=SimpleNamespace(title='Assaí Atacadista Crespo', uri='https://maps.google.com/?cid=1'), web=None),
+                SimpleNamespace(maps=None, web=SimpleNamespace(title='Encarte da semana', uri='https://exemplo.test/encarte')),
+            ],
+            web_search_queries=['arroz promoção Manaus'],
+        )
+        return SimpleNamespace(text=texto, candidates=[SimpleNamespace(grounding_metadata=metadados)])
+
+    @patch.dict('os.environ', {'GEMINI_API_KEY': 'chave-de-teste', 'ANTHROPIC_API_KEY': ''})
+    @patch('apps.lists.services.assistente._cliente_gemini')
+    def test_usa_maps_e_busca_com_a_localizacao_e_devolve_as_fontes(self, cliente):
+        gerar = cliente.return_value.models.generate_content
+        gerar.return_value = self.resposta_com_fontes('O Assaí do Crespo fica a 3 km.')
+
+        resposta = self.perguntar(lat=-3.130, lng=-60.023)
+
+        self.assertEqual(resposta.data['resposta'], 'O Assaí do Crespo fica a 3 km.')
+        self.assertEqual(resposta.data['fonte'], 'gemini')
+        self.assertEqual(
+            [f['tipo'] for f in resposta.data['fontes']], ['maps', 'web', 'busca'],
+        )
+        self.assertIn('google.com/search?q=arroz', resposta.data['fontes'][2]['url'])
+
+        config = gerar.call_args.kwargs['config']
+        self.assertIsNotNone(config.tools[0].google_maps)
+        self.assertIsNotNone(config.tools[1].google_search)
+        local = config.tool_config.retrieval_config.lat_lng
+        self.assertEqual((local.latitude, local.longitude), (-3.13, -60.023))
+        # Os preços das notas vão como extra no contexto.
+        self.assertIn('24.90', config.system_instruction)
+
+    @patch.dict('os.environ', {'GEMINI_API_KEY': 'chave-de-teste', 'ANTHROPIC_API_KEY': ''})
+    @patch('apps.lists.services.assistente._cliente_gemini')
+    def test_sem_localizacao_nao_manda_coordenadas(self, cliente):
+        gerar = cliente.return_value.models.generate_content
+        gerar.return_value = self.resposta_com_fontes('Veja os atacarejos de Manaus.')
+        self.perguntar()
+        self.assertIsNone(gerar.call_args.kwargs['config'].tool_config)
+
+    @patch.dict('os.environ', {'GEMINI_API_KEY': 'chave-de-teste', 'ANTHROPIC_API_KEY': ''})
+    @patch('apps.lists.services.assistente._cliente_gemini')
+    def test_plano_gratuito_sem_maps_cai_no_modo_das_notas(self, cliente):
+        def gerar(model, contents, config):
+            if config.tools and not callable(config.tools[0]):
+                raise RuntimeError('Grounding indisponível no plano gratuito')
+            return SimpleNamespace(text='Pelas notas: R$ 24,90 no Assaí.')
+
+        cliente.return_value.models.generate_content.side_effect = gerar
+        resposta = self.perguntar()
+        self.assertEqual(resposta.data['resposta'], 'Pelas notas: R$ 24,90 no Assaí.')
+        self.assertEqual(resposta.data['fontes'], [])

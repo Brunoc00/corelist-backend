@@ -200,6 +200,8 @@ REST_FRAMEWORK = {
     # Só o assistente usa limite (cada pergunta custa uma chamada ao Claude).
     'DEFAULT_THROTTLE_RATES': {
         'assistente': os.getenv('ASSISTENTE_LIMITE', '30/hour'),
+        # Esqueci a senha: por IP, contra abuso do envio de e-mails.
+        'senha': os.getenv('SENHA_LIMITE', '5/hour'),
     },
 }
 
@@ -210,6 +212,9 @@ REST_FRAMEWORK = {
 ASSISTENTE_IA = os.getenv('ASSISTENTE_IA', 'gemini')
 ASSISTENTE_MODELO = os.getenv('ANTHROPIC_MODEL', 'claude-opus-5-5')
 ASSISTENTE_MODELO_GEMINI = os.getenv('ASSISTENTE_MODELO_GEMINI', 'gemini-3.8-flash')
+# Gemini com Google Maps e busca no Google (precisa do faturamento ativo na
+# conta Google; sem ele, o chat cai no modo só com os preços das notas).
+ASSISTENTE_INTERNET = os.getenv('ASSISTENTE_INTERNET', '1') == '1'
 
 
 # JWT
@@ -223,6 +228,29 @@ SIMPLE_JWT = {
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
 }
+
+
+# Esqueci a senha
+
+# Endereço do site, para o link do e-mail de redefinição.
+SITE_URL = os.getenv('SITE_URL', 'http://localhost:5173').rstrip('/')
+# O link vale 2 horas.
+PASSWORD_RESET_TIMEOUT = 2 * 60 * 60
+
+# E-mail pelo Gmail da equipe (senha de app, não a senha da conta). Sem
+# EMAIL_HOST_USER, os e-mails só aparecem no registro do servidor (teste).
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+if EMAIL_HOST_USER:
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+    EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
+    EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
+    EMAIL_USE_TLS = True
+    EMAIL_TIMEOUT = 15
+    DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', f'CompraFácil <{EMAIL_HOST_USER}>')
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+    DEFAULT_FROM_EMAIL = 'CompraFácil <nao-responda@comprafacil.local>'
 
 
 # CORS
