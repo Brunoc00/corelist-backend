@@ -173,3 +173,25 @@ class ObservedPrice(models.Model):
 
     def __str__(self):
         return f'{self.product_id} @ {self.store_id}: {self.price} ({self.observed_at:%d/%m/%Y})'
+
+
+class ProdutoEscondido(models.Model):
+    """Produto que a pessoa tirou da própria tela de produtos (lixeira).
+
+    O catálogo é de todos: esconder não apaga o produto para os outros, nem
+    das listas e dos preços da cidade."""
+
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='+',
+    )
+    produto = models.ForeignKey(
+        Product, on_delete=models.CASCADE, related_name='escondido_por',
+    )
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['usuario', 'produto'], name='produto_escondido_unico',
+            ),
+        ]

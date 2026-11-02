@@ -1,11 +1,13 @@
 from django.db.models import Exists, OuterRef, ProtectedError
+from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.lists.models import ListItem
 
-from .models import Category, ObservedPrice, Product
+from .models import Category, ObservedPrice, Product, ProdutoEscondido
 from .permissions import CatalogPermission
 from .serializers import CategorySerializer, ProductSerializer
 from .services.openfoodfacts import (
@@ -70,6 +72,12 @@ class ProductListCreateView(generics.ListCreateAPIView):
     )
     serializer_class = ProductSerializer
     permission_classes = [CatalogPermission]
+
+    def get_queryset(self):
+        # Some da tela quem a pessoa escondeu com a lixeira.
+        return super().get_queryset().exclude(
+            escondido_por__usuario=self.request.user,
+        )
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
@@ -166,3 +174,16 @@ class ProductBarcodeView(APIView):
             'produto': ProductSerializer(produto).data,
             'encontrado': bool(sugestao),
         })
+
+
+class ProductEsconderView(APIView):
+    """POST products/<id>/esconder/: a lixeira de um produto que a pessoa não
+    pode apagar (é de outra pessoa, está em lista ou tem preço de nota). O
+    produto sai só da tela de produtos e da busca dela."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        produto = get_object_or_404(Product, pk=pk)
+        ProdutoEscondido.objects.get_or_create(usuario=request.user, produto=produto)
+        return Response(status=status.HTTP_204_NO_CONTENT)

@@ -96,7 +96,11 @@ def buscar(usuario, texto):
             .order_by('-total', 'product_id')
             .values_list('product_id', flat=True)[:8]
         )
-        produtos = {p.id: p for p in Product.objects.filter(id__in=mais_comprados)}
+        produtos = {
+            p.id: p
+            for p in Product.objects.filter(id__in=mais_comprados)
+            .exclude(escondido_por__usuario=usuario)
+        }
         historico = historico_do_usuario(usuario, mais_comprados)
         return [
             _resultado(produtos[pid], historico)
@@ -105,9 +109,9 @@ def buscar(usuario, texto):
 
     candidatos = [
         (pontuar(texto, produto), produto)
-        for produto in Product.objects.only(
-            'id', 'name', 'brand', 'package_size', 'unit',
-        )
+        for produto in Product.objects.exclude(
+            escondido_por__usuario=usuario,  # tirados com a lixeira
+        ).only('id', 'name', 'brand', 'package_size', 'unit')
     ]
     candidatos = [(nota, produto) for nota, produto in candidatos if nota > 0]
 

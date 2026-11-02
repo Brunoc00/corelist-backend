@@ -73,3 +73,48 @@ class RemoverProdutoCadastradoPorEnganoTests(TestCase):
         produto = self.cadastrar()
         resposta = self.client.patch(f'/api/products/{produto.id}/', {'name': 'Outro'}, format='json')
         self.assertEqual(resposta.status_code, 403)
+
+
+class EsconderProdutoTests(TestCase):
+    """Lixeira nos produtos que a pessoa não pode apagar: somem só para ela."""
+
+    def setUp(self):
+        self.pessoa = User.objects.create_user(email='pessoa@exemplo.test', password='senha-de-teste-123')
+        self.outra = User.objects.create_user(email='outra@exemplo.test', password='senha-de-teste-123')
+        self.client = APIClient()
+        self.client.force_authenticate(self.pessoa)
+        self.antigo = Product.objects.create(name='Arroz antigo')
+
+    def ids(self):
+        return [p['id'] for p in self.client.get('/api/products/').data]
+
+    def test_esconde_so_para_quem_pediu(self):
+        resposta = self.client.post(f'/api/products/{self.antigo.id}/esconder/')
+        self.assertEqual(resposta.status_code, 204)
+        self.assertNotIn(self.antigo.id, self.ids())
+        self.assertTrue(Product.objects.filter(pk=self.antigo.id).exists())
+        self.client.force_authenticate(self.outra)
+        self.assertIn(self.antigo.id, self.ids())
+
+    def test_esconder_duas_vezes_nao_da_erro(self):
+        self.client.post(f'/api/products/{self.antigo.id}/esconder/')
+        self.assertEqual(self.client.post(f'/api/products/{self.antigo.id}/esconder/').status_code, 204)
+
+    def test_produto_em_lista_pode_ser_escondido_e_continua_na_lista(self):
+        lista = List.objects.create(name='Mercado', owner=self.pessoa)
+        item = ListItem.objects.create(list=lista, product=self.antigo)
+        self.client.post(f'/api/products/{self.antigo.id}/esconder/')
+        self.assertNotIn(self.antigo.id, self.ids())
+        self.assertTrue(ListItem.objects.filter(pk=item.pk).exists())
+
+    def test_escondido_some_da_busca_da_lista(self):
+        self.client.post(f'/api/products/{self.antigo.id}/esconder/')
+        nomes = [p['name'] for p in self.client.get('/api/lists/produtos/', {'q': 'arroz'}).data]
+        self.assertNotIn('Arroz antigo', nomes)
+
+    def test_produto_inexistente_da_404(self):
+        self.assertEqual(self.client.post('/api/products/999999/esconder/').status_code, 404)
+
+    def test_exige_login(self):
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.post(f'/api/products/{self.antigo.id}/esconder/').status_code, 401)

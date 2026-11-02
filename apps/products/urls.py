@@ -4,6 +4,7 @@ from .views import (
     CategoryListCreateView,
     ProductBarcodeView,
     ProductDetailView,
+    ProductEsconderView,
     ProductListCreateView,
     ProductLookupView,
 )
@@ -14,6 +15,11 @@ urlpatterns = [
         '<int:pk>/codigo-de-barras/',
         ProductBarcodeView.as_view(),
         name='product-barcode',
+    ),
+    path(
+        '<int:pk>/esconder/',
+        ProductEsconderView.as_view(),
+        name='product-esconder',
     ),
     path(
         'categories/',
