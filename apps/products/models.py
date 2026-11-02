@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 
@@ -67,6 +68,15 @@ class Product(models.Model):
         max_length=20,
         choices=SOURCE_CHOICES,
         default=SOURCE_MANUAL,
+    )
+    # Quem cadastrou pela tela de produtos: pode remover um cadastro feito por
+    # engano (se o produto não estiver em lista nem tiver preço de nota).
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='+',
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

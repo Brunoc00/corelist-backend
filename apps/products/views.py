@@ -1,9 +1,11 @@
-from django.db.models import ProtectedError
+from django.db.models import Exists, OuterRef, ProtectedError
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Category, Product
+from apps.lists.models import ListItem
+
+from .models import Category, ObservedPrice, Product
 from .permissions import CatalogPermission
 from .serializers import CategorySerializer, ProductSerializer
 from .services.openfoodfacts import (
@@ -62,9 +64,15 @@ class ProductLookupView(APIView):
 
 
 class ProductListCreateView(generics.ListCreateAPIView):
-    queryset = Product.objects.all()
+    queryset = Product.objects.annotate(
+        em_lista=Exists(ListItem.objects.filter(product=OuterRef('pk'))),
+        tem_preco=Exists(ObservedPrice.objects.filter(product=OuterRef('pk'))),
+    )
     serializer_class = ProductSerializer
     permission_classes = [CatalogPermission]
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
 
 
 class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -73,6 +81,19 @@ class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [CatalogPermission]
 
     def destroy(self, request, *args, **kwargs):
+        produto = self.get_object()
+        # Quem não é administrador só remove o próprio cadastro feito por
+        # engano: produto com preço de nota fiscal alimenta os preços da cidade.
+        if not request.user.is_staff and produto.observed_prices.exists():
+            return Response(
+                {
+                    'detail': (
+                        'Este produto tem preços de notas fiscais e não pode '
+                        'ser apagado.'
+                    ),
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         try:
             return super().destroy(request, *args, **kwargs)
         except ProtectedError:
