@@ -2,13 +2,16 @@
 #
 # - Em todo push e pull request: lint, testes e montagem da imagem.
 # - No branch mvp-comprafacil (ou rodando à mão, em Actions → Run workflow):
-#   publica a imagem no GitHub Container Registry, atualiza o servidor (EC2)
+#   publica a imagem no Docker Hub, atualiza o servidor (EC2)
 #   e confere que a versão nova está no ar.
 #
 # Configuração (Settings → Secrets and variables → Actions):
 #   segredos EC2_HOST, EC2_USER e EC2_SSH_KEY (chave SSH só para o deploy);
+#   variável DOCKERHUB_USERNAME e segredo DOCKERHUB_TOKEN (token de acesso do
+#   Docker Hub, com permissão Read & Write);
 #   variável opcional SMOKE_URL (padrão: o endereço do site publicado + /api).
-# Sem os segredos, o deploy é pulado (o resto do pipeline continua).
+# Sem os dados do Docker Hub, a imagem só é montada; sem os do EC2, o deploy
+# é pulado (o resto do pipeline continua).
 name: CI/CD
 
 on:
@@ -78,12 +81,9 @@ jobs:
         run: python manage.py check --deploy --fail-level ERROR
 
   imagem:
-    name: Imagem Docker (build e push)
+    name: Imagem Docker (build e push no Docker Hub)
     runs-on: ubuntu-latest
     needs: lint-e-testes
-    permissions:
-      contents: read
-      packages: write
     outputs:
       imagem: ${{ steps.nomes.outputs.imagem }}
       versao: ${{ steps.nomes.outputs.versao }}
@@ -94,25 +94,29 @@ jobs:
 
       - name: Nome da imagem e versão
         id: nomes
+        env:
+          USUARIO: ${{ vars.DOCKERHUB_USERNAME }}
+          TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
-          dono="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
-          echo "imagem=ghcr.io/${dono}/corelist-backend" >> "$GITHUB_OUTPUT"
+          echo "imagem=${USUARIO:-local}/corelist-backend" >> "$GITHUB_OUTPUT"
           echo "versao=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
-          if [ "${{ github.event_name }}" != "pull_request" ] && [ "${GITHUB_REF_NAME}" = "${BRANCH_DE_PRODUCAO}" ]; then
+          if [ "${{ github.event_name }}" != "pull_request" ] && [ "${GITHUB_REF_NAME}" = "${BRANCH_DE_PRODUCAO}" ]              && [ -n "$USUARIO" ] && [ -n "$TOKEN" ]; then
             echo "publicar=true" >> "$GITHUB_OUTPUT"
           else
             echo "publicar=false" >> "$GITHUB_OUTPUT"
+            if [ -z "$USUARIO" ] || [ -z "$TOKEN" ]; then
+              echo "::warning::Variável DOCKERHUB_USERNAME ou segredo DOCKERHUB_TOKEN não configurados: a imagem só é montada."
+            fi
           fi
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Login no GitHub Container Registry
+      - name: Login no Docker Hub
         if: steps.nomes.outputs.publicar == 'true'
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # Fora do branch de produção, só monta (confere que o Dockerfile funciona).
       - name: Build e push
@@ -132,10 +136,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: imagem
     if: needs.imagem.outputs.publicar == 'true'
-    # O token do job serve para o servidor baixar a imagem do registry.
-    permissions:
-      contents: read
-      packages: read
     # Um deploy por vez.
     concurrency:
       group: deploy-producao
@@ -151,7 +151,8 @@ jobs:
           EC2_USER: ${{ secrets.EC2_USER }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
           IMAGEM: ${{ needs.imagem.outputs.imagem }}:${{ needs.imagem.outputs.versao }}
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          USUARIO: ${{ vars.DOCKERHUB_USERNAME }}
+          TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           if [ -z "$EC2_HOST" ] || [ -z "$EC2_USER" ] || [ -z "$EC2_SSH_KEY" ]; then
             echo "::warning::Segredos EC2_HOST, EC2_USER e EC2_SSH_KEY não configurados: deploy pulado."
@@ -170,14 +171,15 @@ jobs:
           cd ~/corelist-backend
           git pull --ff-only origin ${BRANCH_DE_PRODUCAO}
           cd deploy
-          echo "$TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          # Login só durante o deploy (funciona com repositório privado).
+          echo "$TOKEN" | docker login -u "$USUARIO" --password-stdin
           export IMAGEM_API="$IMAGEM"
           docker compose pull api
           # Migrações e notas antigas nos preços da cidade (não duplica).
           # -T e </dev/null: sem isso o run lê o resto deste script e o "up" não roda.
           docker compose run --rm -T api sh -c "python manage.py migrate --noinput && python manage.py registrar_precos_antigos" </dev/null
           docker compose up -d
-          docker logout ghcr.io
+          docker logout
           docker image prune -f
           SCRIPT
 
