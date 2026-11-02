@@ -88,6 +88,7 @@ jobs:
       imagem: ${{ steps.nomes.outputs.imagem }}
       versao: ${{ steps.nomes.outputs.versao }}
       publicar: ${{ steps.nomes.outputs.publicar }}
+      usuario: ${{ steps.nomes.outputs.usuario }}
 
     steps:
       - uses: actions/checkout@v4
@@ -98,6 +99,9 @@ jobs:
           USUARIO: ${{ vars.DOCKERHUB_USERNAME }}
           TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
+          # Tira espaços e quebras de linha coladas junto com o valor.
+          USUARIO="$(printf '%s' "$USUARIO" | tr -d '[:space:]')"
+          echo "usuario=${USUARIO}" >> "$GITHUB_OUTPUT"
           echo "imagem=${USUARIO:-local}/corelist-backend" >> "$GITHUB_OUTPUT"
           echo "versao=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           if [ "${{ github.event_name }}" != "pull_request" ] && [ "${GITHUB_REF_NAME}" = "${BRANCH_DE_PRODUCAO}" ]              && [ -n "$USUARIO" ] && [ -n "$TOKEN" ]; then
@@ -115,7 +119,7 @@ jobs:
         if: steps.nomes.outputs.publicar == 'true'
         uses: docker/login-action@v3
         with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
+          username: ${{ steps.nomes.outputs.usuario }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # Fora do branch de produção, só monta (confere que o Dockerfile funciona).
@@ -151,7 +155,7 @@ jobs:
           EC2_USER: ${{ secrets.EC2_USER }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
           IMAGEM: ${{ needs.imagem.outputs.imagem }}:${{ needs.imagem.outputs.versao }}
-          USUARIO: ${{ vars.DOCKERHUB_USERNAME }}
+          USUARIO: ${{ needs.imagem.outputs.usuario }}
           TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           if [ -z "$EC2_HOST" ] || [ -z "$EC2_USER" ] || [ -z "$EC2_SSH_KEY" ]; then
