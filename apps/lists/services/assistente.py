@@ -1,10 +1,11 @@
 """Assistente de preços do Início: a pessoa pergunta onde um produto está mais
-barato e o Claude responde com os preços reais das notas fiscais.
+barato e a IA responde com os preços reais das notas fiscais.
 
 Os preços nunca vêm do modelo: ele chama a ferramenta `buscar_precos`, que usa
 os mesmos dados da tela "Produtos com menor preço" (services/precos.py), e só
-escreve a resposta. Sem ANTHROPIC_API_KEY (ou se a chamada falhar), a
-resposta sai de frases prontas a partir dos mesmos dados.
+escreve a resposta. IAs, na ordem: Gemini (GEMINI_API_KEY, plano gratuito) e
+Claude (ANTHROPIC_API_KEY); ASSISTENTE_IA=claude inverte. Sem chave, ou se as
+chamadas falharem, a resposta sai de frases prontas a partir dos mesmos dados.
 """
 
 import json
@@ -16,6 +17,9 @@ from decimal import Decimal
 
 import anthropic
 from django.conf import settings
+from google import genai
+from google.genai import errors as erros_gemini
+from google.genai import types as tipos_gemini
 from django.utils import timezone
 
 from .precos import VALIDADE_DO_PRECO, buscar_precos
@@ -199,6 +203,49 @@ def responder_com_claude(mensagens, origem=None):
     return _texto(resposta) or None
 
 
+# --- Gemini ------------------------------------------------------------------
+
+def _cliente_gemini():
+    return genai.Client()  # lê GEMINI_API_KEY do ambiente
+
+
+def responder_com_gemini(mensagens, origem=None):
+    """Conversa com o Gemini. A biblioteca chama a função buscar_precos
+    sozinha quando o modelo pede e devolve o texto final."""
+
+    def buscar_precos(produto: str, dias: int) -> dict:
+        """Busca os preços de um produto nas lojas de Manaus, a partir das notas
+        fiscais lidas no app. Devolve os produtos parecidos com o texto, cada um
+        com as lojas do mais barato ao mais caro (preço, medida, data, se pode ter
+        mudado e distância quando conhecida) e o menor preço do período.
+
+        Args:
+            produto: nome do produto, curto, como a pessoa falaria (ex.: "arroz").
+            dias: período do menor preço: 7, 30 ou 90 (use 30 se a pessoa não disser).
+        """
+        dados = resultado_da_busca(produto, dias, origem)
+        # A biblioteca manda o retorno como JSON: datas e decimais já são texto.
+        return json.loads(json.dumps(dados, ensure_ascii=False, default=str))
+
+    conteudo = [
+        {'role': 'user' if m['role'] == 'user' else 'model', 'parts': [{'text': m['content']}]}
+        for m in mensagens
+    ]
+    resposta = _cliente_gemini().models.generate_content(
+        model=settings.ASSISTENTE_MODELO_GEMINI,
+        contents=conteudo,
+        config=tipos_gemini.GenerateContentConfig(
+            system_instruction=SISTEMA,
+            tools=[buscar_precos],
+            max_output_tokens=2000,
+            automatic_function_calling=tipos_gemini.AutomaticFunctionCallingConfig(
+                maximum_remote_calls=MAX_VOLTAS_DE_FERRAMENTA,
+            ),
+        ),
+    )
+    return (resposta.text or '').strip() or None
+
+
 # --- Sem IA (sem chave ou com erro) ----------------------------------------
 
 PALAVRAS_DE_PERGUNTA = {
@@ -261,17 +308,44 @@ def responder_sem_ia(pergunta, origem=None):
 
 # --- Entrada -----------------------------------------------------------------
 
+def _com_gemini(mensagens, origem):
+    try:
+        return responder_com_gemini(mensagens, origem)
+    except erros_gemini.APIError as erro:
+        logger.warning('Assistente: erro na API do Gemini: %s', erro)
+    except Exception:  # erro da biblioteca ou da função: cai no próximo
+        logger.exception('Assistente: falha ao responder com o Gemini.')
+    return None
+
+
+def _com_claude(mensagens, origem):
+    try:
+        return responder_com_claude(mensagens, origem)
+    except anthropic.APIError as erro:
+        logger.warning('Assistente: erro na API do Claude: %s', erro)
+    return None
+
+
+def ias_disponiveis():
+    """[(fonte, função)] das IAs com chave, na ordem de preferência."""
+    ias = []
+    if os.getenv('GEMINI_API_KEY'):
+        ias.append(('gemini', _com_gemini))
+    if os.getenv('ANTHROPIC_API_KEY'):
+        ias.append(('claude', _com_claude))
+    if settings.ASSISTENTE_IA == 'claude':
+        ias.sort(key=lambda ia: ia[0] != 'claude')
+    return ias
+
+
 def responder(mensagens, origem=None):
-    """{'resposta': texto, 'fonte': 'claude' | 'sem_ia'}."""
+    """{'resposta': texto, 'fonte': 'gemini' | 'claude' | 'sem_ia'}."""
     convertidas = preparar_mensagens(mensagens)
     pergunta = convertidas[-1]['content']
 
-    if os.getenv('ANTHROPIC_API_KEY'):
-        try:
-            texto = responder_com_claude(convertidas, origem)
-            if texto:
-                return {'resposta': texto, 'fonte': 'claude'}
-        except anthropic.APIError as erro:
-            logger.warning('Assistente: erro na API do Claude: %s', erro)
+    for fonte, responder_com_ia in ias_disponiveis():
+        texto = responder_com_ia(convertidas, origem)
+        if texto:
+            return {'resposta': texto, 'fonte': fonte}
 
     return {'resposta': responder_sem_ia(pergunta, origem), 'fonte': 'sem_ia'}

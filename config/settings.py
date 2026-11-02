@@ -203,10 +203,13 @@ REST_FRAMEWORK = {
     },
 }
 
-# Assistente de preços (chat do Início): Claude, da Anthropic. A chave vem de
-# ANTHROPIC_API_KEY no ambiente; sem ela, o assistente responde com frases
-# prontas a partir dos mesmos dados.
+# Assistente de preços (chat do Início). Usa a IA cuja chave estiver no
+# ambiente: GEMINI_API_KEY (Gemini, plano gratuito do Google) e/ou
+# ANTHROPIC_API_KEY (Claude, pago por uso). Com as duas, ASSISTENTE_IA decide
+# a primeira (padrão: gemini). Sem nenhuma, responde com frases prontas.
+ASSISTENTE_IA = os.getenv('ASSISTENTE_IA', 'gemini')
 ASSISTENTE_MODELO = os.getenv('ANTHROPIC_MODEL', 'claude-opus-5-5')
+ASSISTENTE_MODELO_GEMINI = os.getenv('ASSISTENTE_MODELO_GEMINI', 'gemini-3.8-flash')
 
 
 # JWT
