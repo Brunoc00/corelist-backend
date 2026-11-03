@@ -198,3 +198,37 @@ def cruzar_com_lista(itens_nota, itens_lista, loja=None):
         usados.add(item_lista.id)
 
     return ligados
+
+
+# Listas em andamento olhadas ao ler uma nota pelo menu.
+LISTAS_OLHADAS = 10
+LISTAS_SUGERIDAS = 3
+
+
+def listas_parecidas(usuario, itens_nota, loja=None):
+    """Listas em andamento da pessoa que parecem ser a desta nota: quantos
+    produtos de cada lista aparecem na nota. Só entram listas com pelo menos
+    2 produtos na nota, ou metade da lista (para listas pequenas)."""
+    from apps.lists.models import List
+
+    listas = (
+        List.objects
+        .filter(owner=usuario, is_completed=False)
+        .prefetch_related('items__product')
+        .order_by('-updated_at')[:LISTAS_OLHADAS]
+    )
+    sugestoes = []
+    for lista in listas:
+        itens_lista = list(lista.items.all())
+        if not itens_lista:
+            continue
+        na_nota = len(cruzar_com_lista(itens_nota, itens_lista, loja))
+        if na_nota >= 2 or (na_nota and na_nota * 2 >= len(itens_lista)):
+            sugestoes.append({
+                'id': lista.id,
+                'nome': lista.name,
+                'itens_na_nota': na_nota,
+                'total_itens': len(itens_lista),
+            })
+    sugestoes.sort(key=lambda s: (-s['itens_na_nota'] / s['total_itens'], -s['itens_na_nota']))
+    return sugestoes[:LISTAS_SUGERIDAS]

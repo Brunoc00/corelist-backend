@@ -116,3 +116,37 @@ class GeocodificarTests(TestCase):
     def test_distancia(self):
         self.assertAlmostEqual(distancia_km(CENTRO, CENTRO), 0)
         self.assertAlmostEqual(distancia_km((0, 0), (0, 1)), 111.2, delta=0.2)
+
+
+class OndeEstouTests(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.usuario = User.objects.create_user(email='onde@exemplo.test', password='senha-de-teste-123')
+        self.client = APIClient()
+        self.client.force_authenticate(self.usuario)
+
+    def resposta(self, dados):
+        mock = MagicMock()
+        mock.__enter__.return_value.read.return_value = json.dumps(dados).encode()
+        return mock
+
+    def test_mostra_rua_bairro_e_cidade_e_guarda_em_cache(self):
+        dados = {'address': {'road': 'Rua 10 de Julho', 'suburb': 'Centro', 'city': 'Manaus'}}
+        with patch('apps.products.services.geocodificar.urlopen', return_value=self.resposta(dados)) as abrir:
+            primeira = self.client.get('/api/lists/onde-estou/', {'lat': -3.1301, 'lng': -60.0231}).data
+            self.client.get('/api/lists/onde-estou/', {'lat': -3.1302, 'lng': -60.0232})
+        self.assertEqual(primeira['texto'], 'Rua 10 de Julho, Centro, Manaus')
+        self.assertEqual(primeira['bairro'], 'Centro')
+        self.assertEqual(abrir.call_count, 1)
+
+    def test_falha_no_mapa_devolve_sem_texto(self):
+        with patch('apps.products.services.geocodificar.urlopen', side_effect=OSError('fora do ar')):
+            self.assertEqual(self.client.get('/api/lists/onde-estou/', {'lat': -3.13, 'lng': -60.02}).data, {'texto': None})
+
+    def test_localizacao_invalida_da_400(self):
+        self.assertEqual(self.client.get('/api/lists/onde-estou/', {'lat': 'x', 'lng': 1}).status_code, 400)
+
+    def test_exige_login(self):
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.get('/api/lists/onde-estou/', {'lat': -3.13, 'lng': -60.02}).status_code, 401)

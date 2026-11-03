@@ -15,6 +15,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from django.conf import settings
+from django.core.cache import cache
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -83,3 +84,43 @@ def distancia_km(origem, destino):
         + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
     )
     return 6371.0 * 2 * math.asin(math.sqrt(a))
+
+
+URL_REVERSO = 'https://nominatim.openstreetmap.org/reverse'
+
+
+def endereco_da_coordenada(lat, lng):
+    """{'rua', 'bairro', 'cidade', 'texto'} perto da coordenada, ou None.
+
+    Para mostrar "você está perto de ..." (uma consulta por região de ~100 m,
+    guardada 1 dia)."""
+    chave = f'onde-estou:{lat:.3f}:{lng:.3f}'
+    guardado = cache.get(chave)
+    if guardado is not None:
+        return guardado or None
+
+    endereco = URL_REVERSO + '?' + urlencode({
+        'format': 'jsonv2', 'lat': f'{lat:.5f}', 'lon': f'{lng:.5f}', 'zoom': 17, 'addressdetails': 1,
+    })
+    pedido = Request(endereco, headers={'User-Agent': settings.GEOCODER_USER_AGENT})
+    try:
+        with urlopen(pedido, timeout=8) as resposta:
+            dados = json.loads(resposta.read().decode('utf-8'))
+    except (HTTPError, URLError, TimeoutError, ValueError, OSError) as erro:
+        logger.warning('Nominatim (onde estou) falhou: %s', erro)
+        return None
+
+    partes = dados.get('address') or {}
+    rua = partes.get('road') or partes.get('pedestrian')
+    bairro = partes.get('suburb') or partes.get('neighbourhood') or partes.get('quarter')
+    cidade = partes.get('city') or partes.get('town') or partes.get('municipality')
+    resultado = {
+        'rua': rua,
+        'bairro': bairro,
+        'cidade': cidade,
+        'texto': ', '.join(p for p in (rua, bairro, cidade) if p) or None,
+    }
+    if not resultado['texto']:
+        resultado = {}
+    cache.set(chave, resultado, 24 * 60 * 60)
+    return resultado or None

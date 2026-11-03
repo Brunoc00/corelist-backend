@@ -28,6 +28,7 @@ from .services.precos import registrar_preco
 from .services.reconhecer import (
     aprender,
     cruzar_com_lista,
+    listas_parecidas,
     loja_da_nota,
     sugerir_produto,
 )
@@ -94,6 +95,12 @@ class NfceLerView(APIView):
             'total': str(nota['total']),
             'itens': itens,
             'lista_importada': importada.id if importada else None,
+            # Listas em andamento que parecem ser desta compra: o site oferece
+            # concluir a lista com a nota em vez de criar uma compra nova.
+            'listas_parecidas': (
+                [] if importada else
+                listas_parecidas(request.user, nota['itens'], loja_da_nota(nota))
+            ),
         })
 
 

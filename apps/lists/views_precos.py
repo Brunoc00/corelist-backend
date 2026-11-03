@@ -15,6 +15,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.products.models import Product
+from apps.products.services.geocodificar import endereco_da_coordenada
 
 from .models import List
 from .services.precos import (
@@ -58,3 +59,16 @@ class PrecosDaListaView(APIView):
     def get(self, request, pk):
         lista = get_object_or_404(List, pk=pk, owner=request.user, is_completed=False)
         return Response(precos_da_lista(lista))
+
+
+class OndeEstouView(APIView):
+    """GET lists/onde-estou/?lat=&lng= -> endereço aproximado da pessoa (rua,
+    bairro e cidade), para mostrar junto da localização."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        origem = localizacao(request.query_params.get('lat'), request.query_params.get('lng'))
+        if origem is None:
+            return Response({'detail': 'Localização inválida.'}, status=400)
+        return Response(endereco_da_coordenada(*origem) or {'texto': None})
