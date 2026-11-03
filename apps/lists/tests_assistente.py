@@ -1,6 +1,6 @@
 import json
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import anthropic
 import httpx2
@@ -13,6 +13,7 @@ from apps.accounts.models import User
 from apps.products.models import Product, Store
 
 from .services.assistente import termo_da_pergunta
+from .services.ferramentas_compras import buscar_promocoes, mercados_perto
 from .tests_precos import _preco
 
 URL = '/api/lists/assistente/'
@@ -48,7 +49,7 @@ class AssistenteTests(TestCase):
 
     # --- Sem chave: frases prontas com os dados reais ---
 
-    @patch.dict('os.environ', {'ANTHROPIC_API_KEY': '', 'GEMINI_API_KEY': ''})
+    @patch.dict('os.environ', {'ANTHROPIC_API_KEY': '', 'GEMINI_API_KEY': '', 'GROQ_API_KEY': '', 'TAVILY_API_KEY': ''})
     def test_sem_chave_responde_com_o_mais_barato_e_outras_opcoes(self):
         resposta = self.perguntar('Onde o arroz está mais barato?')
         self.assertEqual(resposta.status_code, 200)
@@ -57,12 +58,12 @@ class AssistenteTests(TestCase):
         self.assertIn('Outras opções', resposta.data['resposta'])
         self.assertIn('R$ 26,50', resposta.data['resposta'])
 
-    @patch.dict('os.environ', {'ANTHROPIC_API_KEY': '', 'GEMINI_API_KEY': ''})
+    @patch.dict('os.environ', {'ANTHROPIC_API_KEY': '', 'GEMINI_API_KEY': '', 'GROQ_API_KEY': '', 'TAVILY_API_KEY': ''})
     def test_sem_chave_produto_sem_preco(self):
         resposta = self.perguntar('onde tem picanha mais barata?')
         self.assertIn('Ainda não tenho preço de "picanha"', resposta.data['resposta'])
 
-    @patch.dict('os.environ', {'ANTHROPIC_API_KEY': '', 'GEMINI_API_KEY': ''})
+    @patch.dict('os.environ', {'ANTHROPIC_API_KEY': '', 'GEMINI_API_KEY': '', 'GROQ_API_KEY': '', 'TAVILY_API_KEY': ''})
     @patch('apps.lists.services.precos.geocodificar_loja')
     def test_sem_chave_com_localizacao_mostra_distancia(self, _geocodificar):
         resposta = self.perguntar('arroz', lat=-3.130, lng=-60.023)
@@ -74,7 +75,7 @@ class AssistenteTests(TestCase):
 
     # --- Com o Claude (simulado) ---
 
-    @patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'chave-de-teste', 'GEMINI_API_KEY': ''})
+    @patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'chave-de-teste', 'GEMINI_API_KEY': '', 'GROQ_API_KEY': '', 'TAVILY_API_KEY': ''})
     @patch('apps.lists.services.assistente._cliente')
     def test_claude_chama_a_ferramenta_e_responde(self, cliente):
         uso = SimpleNamespace(
@@ -101,13 +102,13 @@ class AssistenteTests(TestCase):
         self.assertEqual(dados['produtos'][0]['lojas'][0]['loja'], 'Assaí Atacadista')
         self.assertEqual(dados['produtos'][0]['lojas'][0]['preco'], '24.90')
 
-    @patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'chave-de-teste', 'GEMINI_API_KEY': ''})
+    @patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'chave-de-teste', 'GEMINI_API_KEY': '', 'GROQ_API_KEY': '', 'TAVILY_API_KEY': ''})
     @patch('apps.lists.services.assistente._cliente')
     def test_recusa_do_claude_cai_nas_frases_prontas(self, cliente):
         cliente.return_value.beta.messages.create.return_value = _resposta([], 'refusal')
         self.assertEqual(self.perguntar('arroz').data['fonte'], 'sem_ia')
 
-    @patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'chave-de-teste', 'GEMINI_API_KEY': ''})
+    @patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'chave-de-teste', 'GEMINI_API_KEY': '', 'GROQ_API_KEY': '', 'TAVILY_API_KEY': ''})
     @patch('apps.lists.services.assistente._cliente')
     def test_erro_da_api_cai_nas_frases_prontas(self, cliente):
         pedido = httpx2.Request('POST', 'https://api.anthropic.com/v1/messages')
@@ -116,7 +117,7 @@ class AssistenteTests(TestCase):
         self.assertEqual(resposta.status_code, 200)
         self.assertEqual(resposta.data['fonte'], 'sem_ia')
 
-    @patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'chave-de-teste', 'GEMINI_API_KEY': ''})
+    @patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'chave-de-teste', 'GEMINI_API_KEY': '', 'GROQ_API_KEY': '', 'TAVILY_API_KEY': ''})
     @patch('apps.lists.services.assistente._cliente')
     def test_historico_vai_alternado(self, cliente):
         cliente.return_value.beta.messages.create.return_value = _resposta([_texto('ok')])
@@ -140,7 +141,7 @@ class AssistenteTests(TestCase):
         self.client.force_authenticate(None)
         self.assertEqual(self.perguntar('arroz').status_code, 401)
 
-    @patch.dict('os.environ', {'ANTHROPIC_API_KEY': '', 'GEMINI_API_KEY': ''})
+    @patch.dict('os.environ', {'ANTHROPIC_API_KEY': '', 'GEMINI_API_KEY': '', 'GROQ_API_KEY': '', 'TAVILY_API_KEY': ''})
     def test_limite_de_perguntas(self):
         with patch.object(ScopedRateThrottle, 'THROTTLE_RATES', {'assistente': '2/hour'}):
             self.assertEqual(self.perguntar('arroz').status_code, 200)
@@ -161,7 +162,7 @@ class AssistenteGeminiTests(TestCase):
     def perguntar(self, texto='Onde o arroz está mais barato?'):
         return self.client.post(URL, {'mensagens': [{'papel': 'usuario', 'texto': texto}]}, format='json')
 
-    @patch.dict('os.environ', {'GEMINI_API_KEY': 'chave-de-teste', 'ANTHROPIC_API_KEY': ''})
+    @patch.dict('os.environ', {'GEMINI_API_KEY': 'chave-de-teste', 'ANTHROPIC_API_KEY': '', 'GROQ_API_KEY': '', 'TAVILY_API_KEY': ''})
     @patch('apps.lists.services.assistente._cliente_gemini')
     def test_gemini_usa_a_ferramenta_com_os_precos_reais(self, cliente):
         vistos = {}
@@ -184,7 +185,7 @@ class AssistenteGeminiTests(TestCase):
         self.assertEqual(vistos['dados']['produtos'][0]['lojas'][0]['preco'], '24.90')
         self.assertEqual(vistos['dados']['produtos'][0]['lojas'][0]['loja'], 'Assaí Atacadista')
 
-    @patch.dict('os.environ', {'GEMINI_API_KEY': 'chave-de-teste', 'ANTHROPIC_API_KEY': 'chave-de-teste'})
+    @patch.dict('os.environ', {'GEMINI_API_KEY': 'chave-de-teste', 'ANTHROPIC_API_KEY': 'chave-de-teste', 'GROQ_API_KEY': '', 'TAVILY_API_KEY': ''})
     @patch('apps.lists.services.assistente._cliente')
     @patch('apps.lists.services.assistente._cliente_gemini')
     def test_com_as_duas_chaves_usa_o_gemini_primeiro(self, gemini, claude):
@@ -192,7 +193,7 @@ class AssistenteGeminiTests(TestCase):
         self.assertEqual(self.perguntar().data['fonte'], 'gemini')
         claude.return_value.beta.messages.create.assert_not_called()
 
-    @patch.dict('os.environ', {'GEMINI_API_KEY': 'chave-de-teste', 'ANTHROPIC_API_KEY': 'chave-de-teste'})
+    @patch.dict('os.environ', {'GEMINI_API_KEY': 'chave-de-teste', 'ANTHROPIC_API_KEY': 'chave-de-teste', 'GROQ_API_KEY': '', 'TAVILY_API_KEY': ''})
     @override_settings(ASSISTENTE_IA='claude')
     @patch('apps.lists.services.assistente._cliente')
     @patch('apps.lists.services.assistente._cliente_gemini')
@@ -201,7 +202,7 @@ class AssistenteGeminiTests(TestCase):
         self.assertEqual(self.perguntar().data['fonte'], 'claude')
         gemini.return_value.models.generate_content.assert_not_called()
 
-    @patch.dict('os.environ', {'GEMINI_API_KEY': 'chave-de-teste', 'ANTHROPIC_API_KEY': 'chave-de-teste'})
+    @patch.dict('os.environ', {'GEMINI_API_KEY': 'chave-de-teste', 'ANTHROPIC_API_KEY': 'chave-de-teste', 'GROQ_API_KEY': '', 'TAVILY_API_KEY': ''})
     @patch('apps.lists.services.assistente._cliente')
     @patch('apps.lists.services.assistente._cliente_gemini')
     def test_se_o_gemini_falha_tenta_o_claude(self, gemini, claude):
@@ -209,7 +210,7 @@ class AssistenteGeminiTests(TestCase):
         claude.return_value.beta.messages.create.return_value = _resposta([_texto('pelo Claude')])
         self.assertEqual(self.perguntar().data, {'resposta': 'pelo Claude', 'fonte': 'claude', 'fontes': []})
 
-    @patch.dict('os.environ', {'GEMINI_API_KEY': 'chave-de-teste', 'ANTHROPIC_API_KEY': ''})
+    @patch.dict('os.environ', {'GEMINI_API_KEY': 'chave-de-teste', 'ANTHROPIC_API_KEY': '', 'GROQ_API_KEY': '', 'TAVILY_API_KEY': ''})
     @patch('apps.lists.services.assistente._cliente_gemini')
     def test_gemini_sem_texto_cai_nas_frases_prontas(self, gemini):
         gemini.return_value.models.generate_content.return_value = SimpleNamespace(text=None)
@@ -218,6 +219,7 @@ class AssistenteGeminiTests(TestCase):
         self.assertIn('R$ 24,90', resposta.data['resposta'])
 
 
+@override_settings(ASSISTENTE_INTERNET=True)
 class AssistenteNaInternetTests(TestCase):
     """Gemini com Google Maps e busca no Google (o padrão com GEMINI_API_KEY)."""
 
@@ -243,7 +245,7 @@ class AssistenteNaInternetTests(TestCase):
         )
         return SimpleNamespace(text=texto, candidates=[SimpleNamespace(grounding_metadata=metadados)])
 
-    @patch.dict('os.environ', {'GEMINI_API_KEY': 'chave-de-teste', 'ANTHROPIC_API_KEY': ''})
+    @patch.dict('os.environ', {'GEMINI_API_KEY': 'chave-de-teste', 'ANTHROPIC_API_KEY': '', 'GROQ_API_KEY': '', 'TAVILY_API_KEY': ''})
     @patch('apps.lists.services.assistente._cliente_gemini')
     def test_usa_maps_e_busca_com_a_localizacao_e_devolve_as_fontes(self, cliente):
         gerar = cliente.return_value.models.generate_content
@@ -266,7 +268,7 @@ class AssistenteNaInternetTests(TestCase):
         # Os preços das notas vão como extra no contexto.
         self.assertIn('24.90', config.system_instruction)
 
-    @patch.dict('os.environ', {'GEMINI_API_KEY': 'chave-de-teste', 'ANTHROPIC_API_KEY': ''})
+    @patch.dict('os.environ', {'GEMINI_API_KEY': 'chave-de-teste', 'ANTHROPIC_API_KEY': '', 'GROQ_API_KEY': '', 'TAVILY_API_KEY': ''})
     @patch('apps.lists.services.assistente._cliente_gemini')
     def test_sem_localizacao_nao_manda_coordenadas(self, cliente):
         gerar = cliente.return_value.models.generate_content
@@ -274,7 +276,7 @@ class AssistenteNaInternetTests(TestCase):
         self.perguntar()
         self.assertIsNone(gerar.call_args.kwargs['config'].tool_config)
 
-    @patch.dict('os.environ', {'GEMINI_API_KEY': 'chave-de-teste', 'ANTHROPIC_API_KEY': ''})
+    @patch.dict('os.environ', {'GEMINI_API_KEY': 'chave-de-teste', 'ANTHROPIC_API_KEY': '', 'GROQ_API_KEY': '', 'TAVILY_API_KEY': ''})
     @patch('apps.lists.services.assistente._cliente_gemini')
     def test_plano_gratuito_sem_maps_cai_no_modo_das_notas(self, cliente):
         def gerar(model, contents, config):
@@ -286,3 +288,141 @@ class AssistenteNaInternetTests(TestCase):
         resposta = self.perguntar()
         self.assertEqual(resposta.data['resposta'], 'Pelas notas: R$ 24,90 no Assaí.')
         self.assertEqual(resposta.data['fontes'], [])
+
+
+SEM_CHAVES = {'GEMINI_API_KEY': '', 'ANTHROPIC_API_KEY': '', 'GROQ_API_KEY': '', 'TAVILY_API_KEY': ''}
+
+
+def _chamada(id_, nome, argumentos):
+    return SimpleNamespace(id=id_, function=SimpleNamespace(name=nome, arguments=json.dumps(argumentos)))
+
+
+def _resposta_groq(texto=None, chamadas=None):
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=texto, tool_calls=chamadas))])
+
+
+class AssistenteGroqTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        usuario = User.objects.create_user(email='groq@exemplo.test', password='senha-de-teste-123')
+        self.client = APIClient()
+        self.client.force_authenticate(usuario)
+        loja = Store.objects.create(cnpj='06057223044209', name='SENDAS DISTRIBUIDORA S/A')
+        _preco(Product.objects.create(name='Arroz Camil tipo 1'), loja, '24.90')
+
+    def perguntar(self, **extra):
+        dados = {'mensagens': [{'papel': 'usuario', 'texto': 'Onde tem arroz mais barato perto de mim?'}], **extra}
+        return self.client.post(URL, dados, format='json')
+
+    @patch.dict('os.environ', {**SEM_CHAVES, 'GROQ_API_KEY': 'chave-de-teste'})
+    @patch('apps.lists.services.assistente.mercados_perto')
+    @patch('apps.lists.services.assistente._cliente_groq')
+    def test_groq_usa_as_ferramentas_e_devolve_as_fontes(self, cliente, mercados):
+        def perto(origem, raio_km, fontes):
+            fontes.append({'tipo': 'maps', 'titulo': 'Atacadão', 'url': 'https://maps.exemplo/1'})
+            return {'raio_km': raio_km, 'mercados': [{'nome': 'Atacadão', 'distancia_km': 1.2}]}
+
+        mercados.side_effect = perto
+        criar = cliente.return_value.chat.completions.create
+        criar.side_effect = [
+            _resposta_groq(chamadas=[
+                _chamada('c1', 'mercados_perto', {'raio_km': 3}),
+                _chamada('c2', 'buscar_precos', {'produto': 'arroz', 'dias': 30}),
+            ]),
+            _resposta_groq('Atacadão a 1,2 km. Numa nota, o arroz saiu por R$ 24,90 no Assaí.'),
+        ]
+
+        resposta = self.perguntar(lat=-3.130, lng=-60.023)
+
+        self.assertEqual(resposta.data['fonte'], 'groq')
+        self.assertIn('Atacadão', resposta.data['resposta'])
+        self.assertEqual(resposta.data['fontes'], [{'tipo': 'maps', 'titulo': 'Atacadão', 'url': 'https://maps.exemplo/1'}])
+        self.assertEqual(mercados.call_args.args[0], (-3.13, -60.023))
+        mensagens = criar.call_args_list[1].kwargs['messages']
+        resultado_notas = json.loads(mensagens[-1]['content'])
+        self.assertEqual(resultado_notas['produtos'][0]['lojas'][0]['preco'], '24.90')
+        self.assertEqual(criar.call_args_list[0].kwargs['model'], 'openai/gpt-oss-120b')
+
+    @patch.dict('os.environ', {**SEM_CHAVES, 'GEMINI_API_KEY': 'chave-de-teste', 'GROQ_API_KEY': 'chave-de-teste'})
+    @patch('apps.lists.services.assistente._cliente_groq')
+    @patch('apps.lists.services.assistente._cliente_gemini')
+    def test_quando_o_gemini_falha_o_groq_responde(self, gemini, cliente_groq):
+        gemini.return_value.models.generate_content.side_effect = RuntimeError('cota do dia esgotada')
+        cliente_groq.return_value.chat.completions.create.return_value = _resposta_groq('pelo Groq')
+        resposta = self.perguntar()
+        self.assertEqual(resposta.data['fonte'], 'groq')
+        self.assertEqual(resposta.data['resposta'], 'pelo Groq')
+
+    @patch.dict('os.environ', {**SEM_CHAVES, 'GEMINI_API_KEY': 'chave-de-teste', 'GROQ_API_KEY': 'chave-de-teste'})
+    @override_settings(ASSISTENTE_IA='groq')
+    @patch('apps.lists.services.assistente._cliente_groq')
+    @patch('apps.lists.services.assistente._cliente_gemini')
+    def test_assistente_ia_groq_poe_o_groq_primeiro(self, gemini, cliente_groq):
+        cliente_groq.return_value.chat.completions.create.return_value = _resposta_groq('pelo Groq')
+        self.assertEqual(self.perguntar().data['fonte'], 'groq')
+        gemini.return_value.models.generate_content.assert_not_called()
+
+    @patch.dict('os.environ', {**SEM_CHAVES, 'GEMINI_API_KEY': 'chave-de-teste'})
+    @patch('apps.lists.services.assistente._cliente_gemini')
+    def test_gemini_tem_as_tres_ferramentas(self, gemini):
+        gemini.return_value.models.generate_content.return_value = SimpleNamespace(text='ok')
+        self.perguntar()
+        config = gemini.return_value.models.generate_content.call_args.kwargs['config']
+        self.assertEqual([f.__name__ for f in config.tools], ['buscar_precos', 'mercados_perto', 'buscar_promocoes'])
+        self.assertIn('Localização da pessoa: não informada', config.system_instruction)
+
+
+class FerramentasDeComprasTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    def _nominatim(self, lugares):
+        resposta = MagicMock()
+        resposta.__enter__.return_value.read.return_value = json.dumps(lugares).encode()
+        return resposta
+
+    def test_mercados_perto_ordena_pela_distancia_e_guarda_em_cache(self):
+        elementos = [
+            {'name': 'Mercado Longe', 'lat': '-3.1400', 'lon': '-60.0234', 'address': {}},
+            {'name': 'Atacadão', 'lat': '-3.1310', 'lon': '-60.0240',
+             'address': {'road': 'Av. Torquato Tapajós', 'house_number': '10'}},
+            {'name': 'Atacadão', 'lat': '-3.1310', 'lon': '-60.0240', 'address': {}},  # repetido: fora
+            {'name': '', 'lat': '-3.13', 'lon': '-60.02'},  # sem nome: fora
+            {'name': 'Mercado Fora do Raio', 'lat': '-3.20', 'lon': '-60.02'},  # ~7,7 km: fora
+        ]
+        fontes = []
+        with patch('apps.lists.services.ferramentas_compras.urlopen', return_value=self._nominatim(elementos)) as abrir:
+            dados = mercados_perto((-3.1303, -60.0234), 3, fontes)
+            mercados_perto((-3.1303, -60.0234), 3, [])  # segunda vez: cache
+        self.assertEqual(abrir.call_count, 1)
+        self.assertEqual([m['nome'] for m in dados['mercados']], ['Atacadão', 'Mercado Longe'])
+        self.assertEqual(dados['mercados'][0]['tipo'], 'atacarejo')
+        self.assertEqual(dados['mercados'][0]['endereco'], 'Av. Torquato Tapajós 10')
+        self.assertNotIn('_lat', dados['mercados'][0])
+        self.assertEqual(fontes[0]['titulo'], 'Atacadão')
+        self.assertIn('google.com/maps', fontes[0]['url'])
+
+    def test_mercados_perto_sem_localizacao(self):
+        self.assertIn('erro', mercados_perto(None))
+
+    def test_mercados_perto_com_erro_no_mapa(self):
+        with patch('apps.lists.services.ferramentas_compras.urlopen', side_effect=OSError('fora do ar')):
+            self.assertIn('erro', mercados_perto((-3.13, -60.02)))
+
+    @patch.dict('os.environ', {'TAVILY_API_KEY': 'chave-de-teste'})
+    @patch('apps.lists.services.ferramentas_compras._cliente_tavily')
+    def test_buscar_promocoes(self, cliente):
+        cliente.return_value.search.return_value = {'results': [
+            {'title': 'Encarte Atacadão Manaus', 'url': 'https://exemplo.test/encarte', 'content': 'Arroz 5 kg R$ 22,90'},
+        ]}
+        fontes = []
+        dados = buscar_promocoes('arroz', fontes)
+        buscar_promocoes('arroz', [])  # cache: não busca de novo
+        self.assertEqual(cliente.return_value.search.call_count, 1)
+        self.assertIn('Manaus', cliente.return_value.search.call_args.args[0])
+        self.assertEqual(dados['resultados'][0]['trecho'], 'Arroz 5 kg R$ 22,90')
+        self.assertEqual(fontes, [{'tipo': 'web', 'titulo': 'Encarte Atacadão Manaus', 'url': 'https://exemplo.test/encarte'}])
+
+    @patch.dict('os.environ', {'TAVILY_API_KEY': ''})
+    def test_buscar_promocoes_sem_chave(self):
+        self.assertIn('erro', buscar_promocoes('arroz'))

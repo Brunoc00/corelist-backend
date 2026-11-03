@@ -1,11 +1,19 @@
-"""Assistente de preços do Início: a pessoa pergunta onde um produto está mais
-barato e a IA responde com os preços reais das notas fiscais.
+"""Assistente de compras do Início: a pessoa pergunta onde comprar algo mais
+barato (ex.: "onde tem arroz mais barato perto de mim?") e a IA responde pelo
+que foi perguntado.
 
-Os preços nunca vêm do modelo: ele chama a ferramenta `buscar_precos`, que usa
-os mesmos dados da tela "Produtos com menor preço" (services/precos.py), e só
-escreve a resposta. IAs, na ordem: Gemini (GEMINI_API_KEY, plano gratuito) e
-Claude (ANTHROPIC_API_KEY); ASSISTENTE_IA=claude inverte. Sem chave, ou se as
-chamadas falharem, a resposta sai de frases prontas a partir dos mesmos dados.
+A IA nunca inventa loja nem preço: ela chama ferramentas do app e só escreve a
+resposta. Ferramentas (as mesmas para todas as IAs):
+- mercados_perto: supermercados e atacarejos ao redor da pessoa (OpenStreetMap);
+- buscar_promocoes: promoções e encartes na internet (Tavily);
+- buscar_precos: preços das notas fiscais lidas no app (extra).
+
+IAs, todas opcionais, na ordem: Gemini (GEMINI_API_KEY, plano gratuito), Groq
+(GROQ_API_KEY, plano gratuito) e Claude (ANTHROPIC_API_KEY, pago).
+ASSISTENTE_IA=groq ou claude põe essa primeiro. Se uma falhar (cota do dia,
+erro), tenta a próxima; sem nenhuma, responde com frases prontas a partir dos
+preços das notas. Com faturamento ativo no Google, ASSISTENTE_INTERNET=1 usa
+antes o Gemini com Google Maps e busca do Google.
 """
 
 import json
@@ -13,63 +21,95 @@ import logging
 import os
 import re
 import unicodedata
-from urllib.parse import urlencode
 from decimal import Decimal
+from urllib.parse import urlencode
 
 import anthropic
+import groq
 from django.conf import settings
+from django.utils import timezone
 from google import genai
 from google.genai import errors as erros_gemini
 from google.genai import types as tipos_gemini
-from django.utils import timezone
 
+from .ferramentas_compras import buscar_promocoes, mercados_perto
 from .precos import VALIDADE_DO_PRECO, buscar_precos
 
 logger = logging.getLogger(__name__)
 
 MAX_MENSAGENS = 10          # histórico enviado ao modelo
 MAX_CARACTERES = 1000       # por mensagem
-MAX_VOLTAS_DE_FERRAMENTA = 4
+MAX_VOLTAS_DE_FERRAMENTA = 5
 LOJAS_POR_PRODUTO = 5
+MAX_FONTES = 8
 
-SISTEMA = """Você é o assistente de preços do CompraFácil, um app de lista de compras de Manaus (AM).
-Os preços vêm de notas fiscais (NFC-e) que as pessoas leram no app: cada preço tem loja, data e, quando a pessoa libera a localização, a distância até ela.
+SISTEMA = """Você é o assistente de compras do CompraFácil, um app de lista de compras de Manaus (AM).
+A pessoa pergunta onde comprar algo mais barato. Responda pelo que ela perguntou, usando as ferramentas:
+- mercados_perto: supermercados e atacarejos perto da localização dela (nome, distância, endereço);
+- buscar_promocoes: promoções, encartes e preços publicados na internet para o produto em Manaus;
+- buscar_precos: preços vistos em notas fiscais lidas no app (com loja e data).
 
 Como responder:
-- Para saber onde algo está mais barato, use a ferramenta buscar_precos. Nunca invente preço, loja ou data: use só o que a ferramenta devolver.
-- Diga primeiro onde está mais barato (loja, preço e quando foi visto). Depois sugira 2 ou 3 outras lojas com preço baixo, do mais barato ao mais caro, com a distância quando houver.
-- Preço com "desatualizado": true foi visto há mais de 1 dia: avise que pode ter mudado.
-- Preço por kg: escreva "R$ X/kg".
-- Se a ferramenta não achar o produto, diga que ainda não há preço dele e sugira ler a nota fiscal da próxima compra no app para alimentar os preços da cidade.
-- Responda em português do Brasil, em poucas frases, sem tabelas nem markdown pesado.
-- Assuntos fora de compras, preços e do app: responda em uma frase que você só ajuda com preços e compras."""
+- Para "onde tem X mais barato perto de mim": chame mercados_perto, buscar_promocoes e buscar_precos.
+- Comece pelo que é mais útil: o melhor preço encontrado (de onde veio e quando) e os mercados mais próximos, com a distância.
+- Preço da internet: diga o nome do site ou do mercado e avise que pode ter mudado ou valer só na promoção.
+- Preço de nota fiscal: diga "visto numa nota fiscal em DD/MM". Se "desatualizado": true, avise que pode ter mudado. Preço por kg: "R$ X/kg".
+- Nunca invente mercado, endereço, distância ou preço, nem cite mercados que você conhece de memória: use só o que as ferramentas devolverem. Se nenhuma achar preço, diga isso e indique os mercados mais próximos que mercados_perto devolveu (atacarejos costumam ser mais baratos), para a pessoa conferir.
+- Preço da internet: os trechos de páginas de loja costumam trazer preços de vários produtos misturados. Só use um preço que apareça claramente junto do nome e da embalagem do mesmo produto (ex.: "Arroz Camil 5 kg R$ 22,29"), e escreva a embalagem. Desconfie de preço muito abaixo do normal (ex.: 5 kg de arroz por menos de R$ 10): nesse caso, não use.
+- Site de rede nacional (ex.: Carrefour, Assaí) pode ter preço diferente na loja de Manaus: avise.
+- Se a localização não foi informada, peça para tocar em "Usar minha localização".
+- Responda em português do Brasil, em texto simples: poucas frases ou uma lista curta com hífen, sem negrito, sem asteriscos e sem tabelas. Sem links no texto: as fontes aparecem separadas no app.
+- Assuntos fora de compras e preços: responda em uma frase que você só ajuda com compras."""
 
-FERRAMENTAS = [{
-    'name': 'buscar_precos',
-    'description': (
-        'Busca os preços de um produto nas lojas de Manaus, a partir das notas '
-        'fiscais lidas no app. Devolve os produtos parecidos com o texto, cada '
-        'um com as lojas do mais barato ao mais caro (preço, medida, data, se '
-        'pode ter mudado e distância quando conhecida) e o menor preço do período.'
-    ),
-    'strict': True,
-    'input_schema': {
-        'type': 'object',
-        'properties': {
-            'produto': {
-                'type': 'string',
-                'description': 'Nome do produto, curto, como a pessoa falaria (ex.: "arroz", "leite integral").',
+ESPECIFICACOES = [
+    {
+        'name': 'buscar_precos',
+        'description': (
+            'Preços de um produto vistos em notas fiscais lidas no app, nas lojas de '
+            'Manaus: as lojas do mais barato ao mais caro (preço, medida, data, se '
+            'pode ter mudado e distância quando conhecida) e o menor preço do período.'
+        ),
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'produto': {'type': 'string', 'description': 'Nome curto do produto (ex.: "arroz").'},
+                'dias': {'type': 'integer', 'enum': [7, 30, 90], 'description': 'Período; use 30 se a pessoa não disser.'},
             },
-            'dias': {
-                'type': 'integer',
-                'enum': [7, 30, 90],
-                'description': 'Período do menor preço; use 30 se a pessoa não disser.',
-            },
+            'required': ['produto', 'dias'],
+            'additionalProperties': False,
         },
-        'required': ['produto', 'dias'],
-        'additionalProperties': False,
     },
-}]
+    {
+        'name': 'mercados_perto',
+        'description': (
+            'Supermercados e atacarejos perto da localização da pessoa (OpenStreetMap), '
+            'do mais perto ao mais longe, com distância em km e endereço quando houver.'
+        ),
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'raio_km': {'type': 'integer', 'description': 'Raio da busca em km, de 1 a 10; use 3 se a pessoa não disser.'},
+            },
+            'required': ['raio_km'],
+            'additionalProperties': False,
+        },
+    },
+    {
+        'name': 'buscar_promocoes',
+        'description': (
+            'Busca na internet promoções, encartes e preços publicados do produto em '
+            'supermercados de Manaus. Devolve título, endereço da página e um trecho.'
+        ),
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'produto': {'type': 'string', 'description': 'Nome curto do produto (ex.: "arroz 5 kg").'},
+            },
+            'required': ['produto'],
+            'additionalProperties': False,
+        },
+    },
+]
 
 
 class MensagemInvalida(ValueError):
@@ -80,7 +120,7 @@ class MensagemInvalida(ValueError):
 
 def preparar_mensagens(mensagens):
     """Valida o histórico que o site manda ([{papel, texto}]) e converte para
-    o formato da API: alternado, começando e terminando no usuário."""
+    o formato das APIs: alternado, começando e terminando no usuário."""
     if not isinstance(mensagens, list) or not mensagens:
         raise MensagemInvalida('Escreva uma pergunta.')
 
@@ -104,14 +144,19 @@ def preparar_mensagens(mensagens):
     return convertidas
 
 
-# --- Ferramenta ------------------------------------------------------------
+def _sistema(origem):
+    onde = 'informada' if origem else 'não informada'
+    return f'{SISTEMA}\n\nData de hoje: {timezone.localdate():%d/%m/%Y}. Localização da pessoa: {onde}.'
+
+
+# --- Ferramentas -------------------------------------------------------------
 
 def _data(valor):
     return timezone.localtime(valor).strftime('%d/%m/%Y')
 
 
 def resultado_da_busca(produto, dias=30, origem=None):
-    """O que a ferramenta devolve ao modelo (JSON enxuto)."""
+    """Preços das notas fiscais para a IA (JSON enxuto)."""
     try:
         dias = int(dias)
     except (TypeError, ValueError):
@@ -146,7 +191,159 @@ def resultado_da_busca(produto, dias=30, origem=None):
     return {'busca': produto, 'produtos': produtos}
 
 
-# --- Claude ----------------------------------------------------------------
+def executar(nome, argumentos, origem, fontes):
+    """Roda a ferramenta pedida pela IA e devolve um dict serializável."""
+    argumentos = argumentos if isinstance(argumentos, dict) else {}
+    if nome == 'buscar_precos':
+        dados = resultado_da_busca(argumentos.get('produto', ''), argumentos.get('dias', 30), origem)
+    elif nome == 'mercados_perto':
+        dados = mercados_perto(origem, argumentos.get('raio_km', 3), fontes)
+    elif nome == 'buscar_promocoes':
+        dados = buscar_promocoes(argumentos.get('produto', ''), fontes)
+    else:
+        dados = {'erro': f'Ferramenta desconhecida: {nome}'}
+    return json.loads(json.dumps(dados, ensure_ascii=False, default=str))
+
+
+def _sem_repetir(fontes):
+    unicas, vistas = [], set()
+    for fonte in fontes:
+        if fonte['url'] not in vistas:
+            vistas.add(fonte['url'])
+            unicas.append(fonte)
+    return unicas[:MAX_FONTES]
+
+
+def _texto_simples(texto):
+    """O chat mostra texto puro: tira negrito/itálico em markdown e títulos."""
+    texto = re.sub(r'\*\*|__', '', texto or '')
+    texto = re.sub(r'(?m)^#{1,6}\s*', '', texto)
+    texto = re.sub(r'(?m)^\s*\*\s+', '- ', texto)
+    return texto.strip()
+
+
+def _saida(texto, fontes):
+    texto = _texto_simples(texto)
+    return {'texto': texto, 'fontes': _sem_repetir(fontes)} if texto else None
+
+
+# --- Gemini (plano gratuito, com as ferramentas do app) ---------------------
+
+def _cliente_gemini():
+    # Lê GEMINI_API_KEY do ambiente. Uma tentativa só e 25 s no máximo: se o
+    # Google estiver com "muita procura" (503), o Groq assume logo.
+    return genai.Client(http_options=tipos_gemini.HttpOptions(
+        timeout=25_000,
+        retry_options=tipos_gemini.HttpRetryOptions(attempts=1),
+    ))
+
+
+def responder_com_gemini(mensagens, origem=None):
+    """A biblioteca do Gemini chama as funções sozinha quando o modelo pede."""
+    fontes = []
+
+    def buscar_precos(produto: str, dias: int) -> dict:
+        """Preços de um produto vistos em notas fiscais lidas no app, nas lojas
+        de Manaus (preço, medida, data, se pode ter mudado e distância).
+
+        Args:
+            produto: nome curto do produto (ex.: "arroz").
+            dias: período do menor preço: 7, 30 ou 90 (use 30 se a pessoa não disser).
+        """
+        return executar('buscar_precos', {'produto': produto, 'dias': dias}, origem, fontes)
+
+    def mercados_perto(raio_km: int) -> dict:
+        """Supermercados e atacarejos perto da localização da pessoa
+        (OpenStreetMap), do mais perto ao mais longe, com distância e endereço.
+
+        Args:
+            raio_km: raio da busca em km, de 1 a 10 (use 3 se a pessoa não disser).
+        """
+        return executar('mercados_perto', {'raio_km': raio_km}, origem, fontes)
+
+    def buscar_promocoes(produto: str) -> dict:
+        """Busca na internet promoções, encartes e preços publicados do produto
+        em supermercados de Manaus (título, endereço da página e trecho).
+
+        Args:
+            produto: nome curto do produto (ex.: "arroz 5 kg").
+        """
+        return executar('buscar_promocoes', {'produto': produto}, origem, fontes)
+
+    # Guardar o cliente numa variável: se ele for descartado no meio da
+    # chamada, a conexão fecha ("client has been closed").
+    cliente = _cliente_gemini()
+    resposta = cliente.models.generate_content(
+        model=settings.ASSISTENTE_MODELO_GEMINI,
+        contents=[
+            {'role': 'user' if m['role'] == 'user' else 'model', 'parts': [{'text': m['content']}]}
+            for m in mensagens
+        ],
+        config=tipos_gemini.GenerateContentConfig(
+            system_instruction=_sistema(origem),
+            tools=[buscar_precos, mercados_perto, buscar_promocoes],
+            max_output_tokens=2000,
+            automatic_function_calling=tipos_gemini.AutomaticFunctionCallingConfig(
+                maximum_remote_calls=MAX_VOLTAS_DE_FERRAMENTA,
+            ),
+        ),
+    )
+    return _saida(resposta.text, fontes)
+
+
+# --- Groq (plano gratuito, reserva do Gemini) -------------------------------
+
+def _cliente_groq():
+    return groq.Groq(timeout=40.0, max_retries=1)  # lê GROQ_API_KEY do ambiente
+
+
+def responder_com_groq(mensagens, origem=None):
+    fontes = []
+    ferramentas = [
+        {'type': 'function', 'function': {
+            'name': e['name'], 'description': e['description'], 'parameters': e['parameters'],
+        }}
+        for e in ESPECIFICACOES
+    ]
+    conversa = [{'role': 'system', 'content': _sistema(origem)}] + [
+        {'role': m['role'], 'content': m['content']} for m in mensagens
+    ]
+    cliente = _cliente_groq()
+
+    for _ in range(MAX_VOLTAS_DE_FERRAMENTA):
+        resposta = cliente.chat.completions.create(
+            model=settings.ASSISTENTE_MODELO_GROQ,
+            messages=conversa,
+            tools=ferramentas,
+            tool_choice='auto',
+            max_completion_tokens=2000,
+        )
+        mensagem = resposta.choices[0].message
+        if not mensagem.tool_calls:
+            return _saida(mensagem.content, fontes)
+
+        conversa.append({
+            'role': 'assistant',
+            'content': mensagem.content or '',
+            'tool_calls': [
+                {'id': c.id, 'type': 'function', 'function': {'name': c.function.name, 'arguments': c.function.arguments}}
+                for c in mensagem.tool_calls
+            ],
+        })
+        for chamada in mensagem.tool_calls:
+            try:
+                argumentos = json.loads(chamada.function.arguments or '{}')
+            except ValueError:
+                argumentos = {}
+            dados = executar(chamada.function.name, argumentos, origem, fontes)
+            conversa.append({
+                'role': 'tool', 'tool_call_id': chamada.id,
+                'content': json.dumps(dados, ensure_ascii=False),
+            })
+    return None
+
+
+# --- Claude (pago; só com ANTHROPIC_API_KEY) ---------------------------------
 
 def _cliente():
     return anthropic.Anthropic(timeout=60.0, max_retries=2)
@@ -157,8 +354,11 @@ def _texto(resposta):
 
 
 def responder_com_claude(mensagens, origem=None):
-    """Conversa com o Claude, executando a ferramenta de preços quando ele
-    pedir. Devolve o texto final, ou None se ele recusar."""
+    fontes = []
+    ferramentas = [
+        {'name': e['name'], 'description': e['description'], 'strict': True, 'input_schema': e['parameters']}
+        for e in ESPECIFICACOES
+    ]
     cliente = _cliente()
     conversa = list(mensagens)
 
@@ -166,8 +366,8 @@ def responder_com_claude(mensagens, origem=None):
         resposta = cliente.beta.messages.create(
             model=settings.ASSISTENTE_MODELO,
             max_tokens=4000,
-            system=SISTEMA,
-            tools=FERRAMENTAS,
+            system=_sistema(origem),
+            tools=ferramentas,
             messages=conversa,
             # Chat simples: pouco raciocínio basta e responde mais rápido.
             output_config={'effort': 'low'},
@@ -175,79 +375,23 @@ def responder_com_claude(mensagens, origem=None):
             betas=['server-side-fallback-2026-07-01'],
             fallbacks='default',
         )
-
         if resposta.stop_reason == 'refusal':
             return None
         if resposta.stop_reason != 'tool_use':
-            return _texto(resposta)
+            return _saida(_texto(resposta), fontes)
 
         conversa.append({'role': 'assistant', 'content': resposta.content})
-        resultados = []
-        for bloco in resposta.content:
-            if bloco.type != 'tool_use':
-                continue
-            if bloco.name != 'buscar_precos':
-                resultados.append({
-                    'type': 'tool_result', 'tool_use_id': bloco.id,
-                    'content': 'Ferramenta desconhecida.', 'is_error': True,
-                })
-                continue
-            entrada = bloco.input if isinstance(bloco.input, dict) else {}
-            dados = resultado_da_busca(entrada.get('produto', ''), entrada.get('dias', 30), origem)
-            resultados.append({
+        conversa.append({'role': 'user', 'content': [
+            {
                 'type': 'tool_result', 'tool_use_id': bloco.id,
-                'content': json.dumps(dados, ensure_ascii=False, default=str),
-            })
-        conversa.append({'role': 'user', 'content': resultados})
-
-    # Muitas voltas: devolve o que tiver de texto.
-    return _texto(resposta) or None
-
-
-# --- Gemini ------------------------------------------------------------------
-
-def _cliente_gemini():
-    return genai.Client()  # lê GEMINI_API_KEY do ambiente
+                'content': json.dumps(executar(bloco.name, bloco.input, origem, fontes), ensure_ascii=False),
+            }
+            for bloco in resposta.content if bloco.type == 'tool_use'
+        ]})
+    return _saida(_texto(resposta), fontes)
 
 
-def responder_com_gemini(mensagens, origem=None):
-    """Conversa com o Gemini. A biblioteca chama a função buscar_precos
-    sozinha quando o modelo pede e devolve o texto final."""
-
-    def buscar_precos(produto: str, dias: int) -> dict:
-        """Busca os preços de um produto nas lojas de Manaus, a partir das notas
-        fiscais lidas no app. Devolve os produtos parecidos com o texto, cada um
-        com as lojas do mais barato ao mais caro (preço, medida, data, se pode ter
-        mudado e distância quando conhecida) e o menor preço do período.
-
-        Args:
-            produto: nome do produto, curto, como a pessoa falaria (ex.: "arroz").
-            dias: período do menor preço: 7, 30 ou 90 (use 30 se a pessoa não disser).
-        """
-        dados = resultado_da_busca(produto, dias, origem)
-        # A biblioteca manda o retorno como JSON: datas e decimais já são texto.
-        return json.loads(json.dumps(dados, ensure_ascii=False, default=str))
-
-    conteudo = [
-        {'role': 'user' if m['role'] == 'user' else 'model', 'parts': [{'text': m['content']}]}
-        for m in mensagens
-    ]
-    resposta = _cliente_gemini().models.generate_content(
-        model=settings.ASSISTENTE_MODELO_GEMINI,
-        contents=conteudo,
-        config=tipos_gemini.GenerateContentConfig(
-            system_instruction=SISTEMA,
-            tools=[buscar_precos],
-            max_output_tokens=2000,
-            automatic_function_calling=tipos_gemini.AutomaticFunctionCallingConfig(
-                maximum_remote_calls=MAX_VOLTAS_DE_FERRAMENTA,
-            ),
-        ),
-    )
-    return (resposta.text or '').strip() or None
-
-
-# --- Gemini pela internet (Google Maps + busca no Google) -------------------
+# --- Gemini com Google Maps e busca do Google (precisa de faturamento) ------
 
 SISTEMA_INTERNET = """Você é o assistente de compras do CompraFácil, um app de lista de compras de Manaus (AM).
 A pessoa pergunta onde comprar algo mais barato. Responda pelo que ela perguntou, usando:
@@ -262,29 +406,24 @@ Regras:
 - Assuntos fora de compras e preços: responda em uma frase que você só ajuda com compras."""
 
 
-def _fontes(resposta):
+def _fontes_do_google(resposta):
     """Links que o Google exige mostrar junto da resposta (Maps e busca)."""
-    fontes, vistos = [], set()
+    fontes = []
     for candidato in (getattr(resposta, 'candidates', None) or [])[:1]:
         metadados = getattr(candidato, 'grounding_metadata', None)
         for trecho in (getattr(metadados, 'grounding_chunks', None) or []):
             for tipo in ('maps', 'web'):
                 origem = getattr(trecho, tipo, None)
                 url = getattr(origem, 'uri', None)
-                if origem and url and url not in vistos:
-                    vistos.add(url)
+                if origem and url:
                     fontes.append({'tipo': tipo, 'titulo': origem.title or url, 'url': url})
         for consulta in (getattr(metadados, 'web_search_queries', None) or [])[:3]:
             url = 'https://www.google.com/search?' + urlencode({'q': consulta})
-            if url not in vistos:
-                vistos.add(url)
-                fontes.append({'tipo': 'busca', 'titulo': consulta, 'url': url})
-    return fontes[:8]
+            fontes.append({'tipo': 'busca', 'titulo': consulta, 'url': url})
+    return fontes
 
 
 def responder_com_gemini_na_internet(mensagens, origem=None):
-    """{'texto', 'fontes'}: Gemini com Google Maps (lojas perto da pessoa) e
-    busca no Google (promoções). Os preços das notas vão só como extra."""
     termo = termo_da_pergunta(mensagens[-1]['content'])
     notas = resultado_da_busca(termo, 30, origem)['produtos'] if termo else []
     onde = (
@@ -296,11 +435,6 @@ def responder_com_gemini_na_internet(mensagens, origem=None):
         '\nPreços de notas fiscais do app (extra, pode estar vazio): '
         + json.dumps(notas, ensure_ascii=False, default=str)
     )
-
-    ferramentas = [
-        tipos_gemini.Tool(google_maps=tipos_gemini.GoogleMaps()),
-        tipos_gemini.Tool(google_search=tipos_gemini.GoogleSearch()),
-    ]
     config_ferramentas = None
     if origem:
         config_ferramentas = tipos_gemini.ToolConfig(
@@ -310,7 +444,8 @@ def responder_com_gemini_na_internet(mensagens, origem=None):
             ),
         )
 
-    resposta = _cliente_gemini().models.generate_content(
+    cliente = _cliente_gemini()
+    resposta = cliente.models.generate_content(
         model=settings.ASSISTENTE_MODELO_GEMINI,
         contents=[
             {'role': 'user' if m['role'] == 'user' else 'model', 'parts': [{'text': m['content']}]}
@@ -318,13 +453,15 @@ def responder_com_gemini_na_internet(mensagens, origem=None):
         ],
         config=tipos_gemini.GenerateContentConfig(
             system_instruction=SISTEMA_INTERNET + contexto,
-            tools=ferramentas,
+            tools=[
+                tipos_gemini.Tool(google_maps=tipos_gemini.GoogleMaps()),
+                tipos_gemini.Tool(google_search=tipos_gemini.GoogleSearch()),
+            ],
             tool_config=config_ferramentas,
             max_output_tokens=2000,
         ),
     )
-    texto = (resposta.text or '').strip()
-    return {'texto': texto, 'fontes': _fontes(resposta)} if texto else None
+    return _saida(resposta.text, _fontes_do_google(resposta))
 
 
 # --- Sem IA (sem chave ou com erro) ----------------------------------------
@@ -389,33 +526,19 @@ def responder_sem_ia(pergunta, origem=None):
 
 # --- Entrada -----------------------------------------------------------------
 
-def _com_gemini_na_internet(mensagens, origem):
-    try:
-        return responder_com_gemini_na_internet(mensagens, origem)
-    except erros_gemini.APIError as erro:
-        # Ex.: chave no plano gratuito, sem Maps/busca: usa o modo das notas.
-        logger.warning('Assistente: Gemini com Maps/busca falhou: %s', erro)
-    except Exception:
-        logger.exception('Assistente: falha no Gemini com Maps/busca.')
-    return None
+ERROS_ESPERADOS = (erros_gemini.APIError, groq.APIError, anthropic.APIError)
 
 
-def _com_gemini(mensagens, origem):
-    try:
-        return responder_com_gemini(mensagens, origem)
-    except erros_gemini.APIError as erro:
-        logger.warning('Assistente: erro na API do Gemini: %s', erro)
-    except Exception:  # erro da biblioteca ou da função: cai no próximo
-        logger.exception('Assistente: falha ao responder com o Gemini.')
-    return None
-
-
-def _com_claude(mensagens, origem):
-    try:
-        return responder_com_claude(mensagens, origem)
-    except anthropic.APIError as erro:
-        logger.warning('Assistente: erro na API do Claude: %s', erro)
-    return None
+def _tentar(nome, funcao):
+    def tentar(mensagens, origem):
+        try:
+            return funcao(mensagens, origem)
+        except ERROS_ESPERADOS as erro:  # cota do dia, chave, rede
+            logger.warning('Assistente: %s falhou: %s', nome, erro)
+        except Exception:  # erro inesperado: registra e tenta a próxima IA
+            logger.exception('Assistente: falha inesperada em %s.', nome)
+        return None
+    return tentar
 
 
 def ias_disponiveis():
@@ -423,25 +546,25 @@ def ias_disponiveis():
     ias = []
     if os.getenv('GEMINI_API_KEY'):
         if settings.ASSISTENTE_INTERNET:
-            ias.append(('gemini', _com_gemini_na_internet))
-        ias.append(('gemini', _com_gemini))
+            ias.append(('gemini', _tentar('Gemini com Google', responder_com_gemini_na_internet)))
+        ias.append(('gemini', _tentar('Gemini', responder_com_gemini)))
+    if os.getenv('GROQ_API_KEY'):
+        ias.append(('groq', _tentar('Groq', responder_com_groq)))
     if os.getenv('ANTHROPIC_API_KEY'):
-        ias.append(('claude', _com_claude))
-    if settings.ASSISTENTE_IA == 'claude':
-        ias.sort(key=lambda ia: ia[0] != 'claude')
+        ias.append(('claude', _tentar('Claude', responder_com_claude)))
+    if settings.ASSISTENTE_IA in ('groq', 'claude'):
+        ias.sort(key=lambda ia: ia[0] != settings.ASSISTENTE_IA)
     return ias
 
 
 def responder(mensagens, origem=None):
-    """{'resposta', 'fonte': 'gemini' | 'claude' | 'sem_ia', 'fontes': [links]}."""
+    """{'resposta', 'fonte': 'gemini' | 'groq' | 'claude' | 'sem_ia', 'fontes'}."""
     convertidas = preparar_mensagens(mensagens)
     pergunta = convertidas[-1]['content']
 
     for fonte, responder_com_ia in ias_disponiveis():
         saida = responder_com_ia(convertidas, origem)
-        if isinstance(saida, dict):
-            return {'resposta': saida['texto'], 'fonte': fonte, 'fontes': saida['fontes']}
         if saida:
-            return {'resposta': saida, 'fonte': fonte, 'fontes': []}
+            return {'resposta': saida['texto'], 'fonte': fonte, 'fontes': saida['fontes']}
 
     return {'resposta': responder_sem_ia(pergunta, origem), 'fonte': 'sem_ia', 'fontes': []}

@@ -15,3 +15,5 @@ google-genai==2.25.0
 pydantic==2.13.5
 gunicorn==23.0.0
 anthropic==2.3.0
+groq==1.7.0
+tavily-python==0.8.5

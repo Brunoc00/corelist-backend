@@ -214,7 +214,9 @@ ASSISTENTE_MODELO = os.getenv('ANTHROPIC_MODEL', 'claude-opus-5-5')
 ASSISTENTE_MODELO_GEMINI = os.getenv('ASSISTENTE_MODELO_GEMINI', 'gemini-3.8-flash')
 # Gemini com Google Maps e busca no Google (precisa do faturamento ativo na
 # conta Google; sem ele, o chat cai no modo só com os preços das notas).
-ASSISTENTE_INTERNET = os.getenv('ASSISTENTE_INTERNET', '1') == '1'
+ASSISTENTE_INTERNET = os.getenv('ASSISTENTE_INTERNET', '0') == '1'
+# Groq (plano gratuito): reserva do Gemini, com as mesmas ferramentas.
+ASSISTENTE_MODELO_GROQ = os.getenv('ASSISTENTE_MODELO_GROQ', 'openai/gpt-oss-120b')
 
 
 # JWT
