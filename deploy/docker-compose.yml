@@ -29,7 +29,9 @@ services:
       retries: 10
 
   api:
-    image: ${IMAGEM_API:-corelist-backend:local}
+    # O CI informa a imagem do commit (IMAGEM_API); à mão, usa a última
+    # publicada no Docker Hub ("docker compose pull api" baixa a mais nova).
+    image: ${IMAGEM_API:-jvxp34/corelist-backend:latest}
     build: ..
     restart: unless-stopped
     env_file: .env
