@@ -24,6 +24,7 @@ from django.core.cache import cache
 from tavily import TavilyClient
 
 from apps.products.services.geocodificar import distancia_km
+from apps.products.services.redes import rede_pelo_nome
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ def _consultar_nominatim(lat, lng, raio_km):
         return json.loads(resposta.read().decode('utf-8'))
 
 
-def mercados_perto(origem, raio_km=RAIO_PADRAO_KM, fontes=None):
+def mercados_perto(origem, raio_km=RAIO_PADRAO_KM, fontes=None, lojas=None):
     """Supermercados e atacarejos até raio_km da origem (lat, lng)."""
     if origem is None:
         return {'erro': 'A pessoa não liberou a localização: peça para tocar em "Usar minha localização".'}
@@ -104,12 +105,17 @@ def mercados_perto(origem, raio_km=RAIO_PADRAO_KM, fontes=None):
     mercados.sort(key=lambda m: m['distancia_km'])
     mercados = mercados[:MERCADOS_NO_MAXIMO]
 
-    if fontes is not None:
-        for mercado in mercados[:4]:
-            fontes.append({
-                'tipo': 'maps',
-                'titulo': mercado['nome'],
-                'url': _link_mapa(mercado['nome'], mercado['_lat'], mercado['_lng']),
+    for mercado in mercados[:4]:
+        url = _link_mapa(mercado['nome'], mercado['_lat'], mercado['_lng'])
+        if fontes is not None:
+            fontes.append({'tipo': 'maps', 'titulo': mercado['nome'], 'url': url})
+        if lojas is not None:
+            # O nome do mapa já é o popular ("Supermercado DB"): fica ele, com
+            # o logo da rede quando a rede é conhecida.
+            _, icone = rede_pelo_nome(mercado['nome'])
+            lojas.append({
+                'nome': mercado['nome'], 'marca': None, 'icone': icone,
+                'distancia_km': mercado['distancia_km'], 'url': url,
             })
     for mercado in mercados:
         del mercado['_lat'], mercado['_lng']

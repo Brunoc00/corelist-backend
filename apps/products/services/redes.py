@@ -24,6 +24,24 @@ def _normalizar(texto):
     return re.sub(r'\s+', ' ', sem_acento.upper()).strip()
 
 
+# Nome popular da loja (ex.: no OpenStreetMap) -> mesma rede.
+NOMES_POPULARES = [
+    (re.compile(r'\bASSAI\b'), 'Assaí Atacadista', 'assai'),
+    (re.compile(r'\bATACADAO\b'), 'Atacadão', 'atacadao'),
+    (re.compile(r'\bCARREFOUR\b'), 'Carrefour', 'carrefour'),
+    (re.compile(r'\bD ?B\b'), 'DB Supermercados', 'db'),
+]
+
+
+def rede_pelo_nome(nome):
+    """(nome conhecido, ícone) a partir do nome popular, ou (None, None)."""
+    texto = _normalizar(nome)
+    for padrao, conhecido, chave in NOMES_POPULARES:
+        if padrao.search(texto):
+            return conhecido, chave
+    return rede_da_loja(nome)
+
+
 def rede_da_loja(razao_social):
     """Devolve (nome conhecido, chave do ícone) ou (None, None)."""
     nome = _normalizar(razao_social)

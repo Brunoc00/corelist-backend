@@ -32,8 +32,11 @@ from google import genai
 from google.genai import errors as erros_gemini
 from google.genai import types as tipos_gemini
 
+from apps.products.models import Product
+
+from .busca import pontuar
 from .ferramentas_compras import buscar_promocoes, mercados_perto
-from .precos import VALIDADE_DO_PRECO, buscar_precos
+from .precos import VALIDADE_DO_PRECO, buscar_precos, link_como_chegar
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +45,8 @@ MAX_CARACTERES = 1000       # por mensagem
 MAX_VOLTAS_DE_FERRAMENTA = 5
 LOJAS_POR_PRODUTO = 5
 MAX_FONTES = 8
+MAX_PRODUTOS = 3
+MAX_LOJAS = 5
 
 SISTEMA = """Você é o assistente de compras do CompraFácil, um app de lista de compras de Manaus (AM).
 A pessoa pergunta onde comprar algo mais barato. Responda pelo que ela perguntou, usando as ferramentas:
@@ -191,15 +196,20 @@ def resultado_da_busca(produto, dias=30, origem=None):
     return {'busca': produto, 'produtos': produtos}
 
 
-def executar(nome, argumentos, origem, fontes):
+def nova_coleta():
+    """O que as ferramentas juntam para mostrar abaixo da resposta."""
+    return {'fontes': [], 'lojas': []}
+
+
+def executar(nome, argumentos, origem, coleta):
     """Roda a ferramenta pedida pela IA e devolve um dict serializável."""
     argumentos = argumentos if isinstance(argumentos, dict) else {}
     if nome == 'buscar_precos':
         dados = resultado_da_busca(argumentos.get('produto', ''), argumentos.get('dias', 30), origem)
     elif nome == 'mercados_perto':
-        dados = mercados_perto(origem, argumentos.get('raio_km', 3), fontes)
+        dados = mercados_perto(origem, argumentos.get('raio_km', 3), coleta['fontes'], coleta['lojas'])
     elif nome == 'buscar_promocoes':
-        dados = buscar_promocoes(argumentos.get('produto', ''), fontes)
+        dados = buscar_promocoes(argumentos.get('produto', ''), coleta['fontes'])
     else:
         dados = {'erro': f'Ferramenta desconhecida: {nome}'}
     return json.loads(json.dumps(dados, ensure_ascii=False, default=str))
@@ -222,9 +232,70 @@ def _texto_simples(texto):
     return texto.strip()
 
 
-def _saida(texto, fontes):
+def _saida(texto, coleta):
     texto = _texto_simples(texto)
-    return {'texto': texto, 'fontes': _sem_repetir(fontes)} if texto else None
+    return {'texto': texto, 'coleta': coleta} if texto else None
+
+
+def produtos_para_mostrar(termo, origem=None):
+    """Até 3 produtos com foto para o cartão: primeiro os que têm preço nas
+    notas (com o menor preço); senão, produtos parecidos do catálogo."""
+    if not termo:
+        return []
+    produtos, vistos = [], set()
+    for resumo in buscar_precos(termo, limite=MAX_PRODUTOS, origem=origem):
+        produto = resumo['produto']
+        lojas = sorted(resumo['lojas'], key=lambda linha: Decimal(linha['preco']))
+        melhor = lojas[0] if lojas else None
+        vistos.add(produto['id'])
+        produtos.append({
+            'id': produto['id'],
+            'nome': produto['name'],
+            'embalagem': produto['embalagem'] or None,
+            'imagem_url': produto['image_url'] or None,
+            'preco': melhor['preco'] if melhor else None,
+            'medida': melhor['medida'] if melhor else None,
+            'loja': (melhor['loja']['marca'] or melhor['loja']['nome']) if melhor else None,
+        })
+    if not any(p['imagem_url'] for p in produtos):
+        com_foto = [
+            (pontuar(termo, produto), produto)
+            for produto in Product.objects.exclude(image_url='').exclude(id__in=vistos)
+        ]
+        com_foto = sorted((par for par in com_foto if par[0] > 0), key=lambda par: -par[0])
+        for _, produto in com_foto[:MAX_PRODUTOS - len(produtos)]:
+            produtos.append({
+                'id': produto.id, 'nome': produto.name,
+                'embalagem': (produto.package_size or produto.unit or '').strip() or None,
+                'imagem_url': produto.image_url, 'preco': None, 'medida': None, 'loja': None,
+            })
+    return produtos[:MAX_PRODUTOS]
+
+
+def lojas_das_notas(termo, origem=None):
+    """Lojas onde o produto apareceu nas notas, com logo e rota."""
+    if not termo:
+        return []
+    lojas = []
+    for resumo in buscar_precos(termo, limite=MAX_PRODUTOS, origem=origem):
+        for linha in resumo['lojas']:
+            loja = linha['loja']
+            lojas.append({
+                'nome': loja['nome'], 'marca': loja['marca'], 'icone': loja['icone'],
+                'distancia_km': loja.get('distancia_km'), 'url': link_como_chegar(loja),
+            })
+    return lojas
+
+
+def _juntar_lojas(*listas):
+    juntas, vistas = [], set()
+    for lista in listas:
+        for loja in lista:
+            chave = (loja['marca'] or loja['nome']).lower(), loja.get('distancia_km')
+            if chave not in vistas:
+                vistas.add(chave)
+                juntas.append(loja)
+    return juntas[:MAX_LOJAS]
 
 
 # --- Gemini (plano gratuito, com as ferramentas do app) ---------------------
@@ -240,7 +311,7 @@ def _cliente_gemini():
 
 def responder_com_gemini(mensagens, origem=None):
     """A biblioteca do Gemini chama as funções sozinha quando o modelo pede."""
-    fontes = []
+    coleta = nova_coleta()
 
     def buscar_precos(produto: str, dias: int) -> dict:
         """Preços de um produto vistos em notas fiscais lidas no app, nas lojas
@@ -250,7 +321,7 @@ def responder_com_gemini(mensagens, origem=None):
             produto: nome curto do produto (ex.: "arroz").
             dias: período do menor preço: 7, 30 ou 90 (use 30 se a pessoa não disser).
         """
-        return executar('buscar_precos', {'produto': produto, 'dias': dias}, origem, fontes)
+        return executar('buscar_precos', {'produto': produto, 'dias': dias}, origem, coleta)
 
     def mercados_perto(raio_km: int) -> dict:
         """Supermercados e atacarejos perto da localização da pessoa
@@ -259,7 +330,7 @@ def responder_com_gemini(mensagens, origem=None):
         Args:
             raio_km: raio da busca em km, de 1 a 10 (use 3 se a pessoa não disser).
         """
-        return executar('mercados_perto', {'raio_km': raio_km}, origem, fontes)
+        return executar('mercados_perto', {'raio_km': raio_km}, origem, coleta)
 
     def buscar_promocoes(produto: str) -> dict:
         """Busca na internet promoções, encartes e preços publicados do produto
@@ -268,7 +339,7 @@ def responder_com_gemini(mensagens, origem=None):
         Args:
             produto: nome curto do produto (ex.: "arroz 5 kg").
         """
-        return executar('buscar_promocoes', {'produto': produto}, origem, fontes)
+        return executar('buscar_promocoes', {'produto': produto}, origem, coleta)
 
     # Guardar o cliente numa variável: se ele for descartado no meio da
     # chamada, a conexão fecha ("client has been closed").
@@ -288,7 +359,7 @@ def responder_com_gemini(mensagens, origem=None):
             ),
         ),
     )
-    return _saida(resposta.text, fontes)
+    return _saida(resposta.text, coleta)
 
 
 # --- Groq (plano gratuito, reserva do Gemini) -------------------------------
@@ -298,7 +369,7 @@ def _cliente_groq():
 
 
 def responder_com_groq(mensagens, origem=None):
-    fontes = []
+    coleta = nova_coleta()
     ferramentas = [
         {'type': 'function', 'function': {
             'name': e['name'], 'description': e['description'], 'parameters': e['parameters'],
@@ -320,7 +391,7 @@ def responder_com_groq(mensagens, origem=None):
         )
         mensagem = resposta.choices[0].message
         if not mensagem.tool_calls:
-            return _saida(mensagem.content, fontes)
+            return _saida(mensagem.content, coleta)
 
         conversa.append({
             'role': 'assistant',
@@ -335,7 +406,7 @@ def responder_com_groq(mensagens, origem=None):
                 argumentos = json.loads(chamada.function.arguments or '{}')
             except ValueError:
                 argumentos = {}
-            dados = executar(chamada.function.name, argumentos, origem, fontes)
+            dados = executar(chamada.function.name, argumentos, origem, coleta)
             conversa.append({
                 'role': 'tool', 'tool_call_id': chamada.id,
                 'content': json.dumps(dados, ensure_ascii=False),
@@ -354,7 +425,7 @@ def _texto(resposta):
 
 
 def responder_com_claude(mensagens, origem=None):
-    fontes = []
+    coleta = nova_coleta()
     ferramentas = [
         {'name': e['name'], 'description': e['description'], 'strict': True, 'input_schema': e['parameters']}
         for e in ESPECIFICACOES
@@ -378,17 +449,17 @@ def responder_com_claude(mensagens, origem=None):
         if resposta.stop_reason == 'refusal':
             return None
         if resposta.stop_reason != 'tool_use':
-            return _saida(_texto(resposta), fontes)
+            return _saida(_texto(resposta), coleta)
 
         conversa.append({'role': 'assistant', 'content': resposta.content})
         conversa.append({'role': 'user', 'content': [
             {
                 'type': 'tool_result', 'tool_use_id': bloco.id,
-                'content': json.dumps(executar(bloco.name, bloco.input, origem, fontes), ensure_ascii=False),
+                'content': json.dumps(executar(bloco.name, bloco.input, origem, coleta), ensure_ascii=False),
             }
             for bloco in resposta.content if bloco.type == 'tool_use'
         ]})
-    return _saida(_texto(resposta), fontes)
+    return _saida(_texto(resposta), coleta)
 
 
 # --- Gemini com Google Maps e busca do Google (precisa de faturamento) ------
@@ -461,7 +532,7 @@ def responder_com_gemini_na_internet(mensagens, origem=None):
             max_output_tokens=2000,
         ),
     )
-    return _saida(resposta.text, _fontes_do_google(resposta))
+    return _saida(resposta.text, {'fontes': _fontes_do_google(resposta), 'lojas': []})
 
 
 # --- Sem IA (sem chave ou com erro) ----------------------------------------
@@ -558,13 +629,28 @@ def ias_disponiveis():
 
 
 def responder(mensagens, origem=None):
-    """{'resposta', 'fonte': 'gemini' | 'groq' | 'claude' | 'sem_ia', 'fontes'}."""
+    """{'resposta', 'fonte': 'gemini' | 'groq' | 'claude' | 'sem_ia', 'fontes',
+    'produtos' (com foto), 'lojas' (com logo e rota)}."""
     convertidas = preparar_mensagens(mensagens)
     pergunta = convertidas[-1]['content']
+    termo = termo_da_pergunta(pergunta)
 
-    for fonte, responder_com_ia in ias_disponiveis():
+    texto, fonte, coleta = None, 'sem_ia', nova_coleta()
+    for nome, responder_com_ia in ias_disponiveis():
         saida = responder_com_ia(convertidas, origem)
         if saida:
-            return {'resposta': saida['texto'], 'fonte': fonte, 'fontes': saida['fontes']}
+            texto, fonte, coleta = saida['texto'], nome, saida['coleta']
+            break
+    if texto is None:
+        texto = responder_sem_ia(pergunta, origem)
+    if origem and termo and not coleta['lojas']:
+        # A IA às vezes não pede os mercados perto: o app busca para os cartões.
+        mercados_perto(origem, 3, None, coleta['lojas'])
 
-    return {'resposta': responder_sem_ia(pergunta, origem), 'fonte': 'sem_ia', 'fontes': []}
+    return {
+        'resposta': texto,
+        'fonte': fonte,
+        'fontes': _sem_repetir(coleta['fontes']),
+        'produtos': produtos_para_mostrar(termo, origem),
+        'lojas': _juntar_lojas(lojas_das_notas(termo, origem), coleta['lojas']),
+    }

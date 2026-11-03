@@ -89,7 +89,9 @@ class AssistenteTests(TestCase):
 
         resposta = self.perguntar('Onde o arroz está mais barato?')
 
-        self.assertEqual(resposta.data, {'resposta': 'O arroz está mais barato no Assaí.', 'fonte': 'claude', 'fontes': []})
+        self.assertEqual(resposta.data['resposta'], 'O arroz está mais barato no Assaí.')
+        self.assertEqual(resposta.data['fonte'], 'claude')
+        self.assertEqual(resposta.data['fontes'], [])
         self.assertEqual(criar.call_count, 2)
         primeira = criar.call_args_list[0].kwargs
         self.assertEqual(primeira['model'], 'claude-opus-5-5')
@@ -208,7 +210,8 @@ class AssistenteGeminiTests(TestCase):
     def test_se_o_gemini_falha_tenta_o_claude(self, gemini, claude):
         gemini.return_value.models.generate_content.side_effect = RuntimeError('cota esgotada')
         claude.return_value.beta.messages.create.return_value = _resposta([_texto('pelo Claude')])
-        self.assertEqual(self.perguntar().data, {'resposta': 'pelo Claude', 'fonte': 'claude', 'fontes': []})
+        dados = self.perguntar().data
+        self.assertEqual((dados['resposta'], dados['fonte']), ('pelo Claude', 'claude'))
 
     @patch.dict('os.environ', {'GEMINI_API_KEY': 'chave-de-teste', 'ANTHROPIC_API_KEY': '', 'GROQ_API_KEY': '', 'TAVILY_API_KEY': ''})
     @patch('apps.lists.services.assistente._cliente_gemini')
@@ -318,8 +321,10 @@ class AssistenteGroqTests(TestCase):
     @patch('apps.lists.services.assistente.mercados_perto')
     @patch('apps.lists.services.assistente._cliente_groq')
     def test_groq_usa_as_ferramentas_e_devolve_as_fontes(self, cliente, mercados):
-        def perto(origem, raio_km, fontes):
+        def perto(origem, raio_km, fontes, lojas):
             fontes.append({'tipo': 'maps', 'titulo': 'Atacadão', 'url': 'https://maps.exemplo/1'})
+            lojas.append({'nome': 'Atacadão', 'marca': 'Atacadão', 'icone': 'atacadao',
+                          'distancia_km': 1.2, 'url': 'https://maps.exemplo/1'})
             return {'raio_km': raio_km, 'mercados': [{'nome': 'Atacadão', 'distancia_km': 1.2}]}
 
         mercados.side_effect = perto
@@ -342,6 +347,12 @@ class AssistenteGroqTests(TestCase):
         resultado_notas = json.loads(mensagens[-1]['content'])
         self.assertEqual(resultado_notas['produtos'][0]['lojas'][0]['preco'], '24.90')
         self.assertEqual(criar.call_args_list[0].kwargs['model'], 'openai/gpt-oss-120b')
+        # Cartões: a loja do mapa (com logo) e a loja da nota.
+        nomes = [l['marca'] or l['nome'] for l in resposta.data['lojas']]
+        self.assertIn('Atacadão', nomes)
+        self.assertIn('Assaí Atacadista', nomes)
+        atacadao = next(l for l in resposta.data['lojas'] if l['nome'] == 'Atacadão')
+        self.assertEqual(atacadao['icone'], 'atacadao')
 
     @patch.dict('os.environ', {**SEM_CHAVES, 'GEMINI_API_KEY': 'chave-de-teste', 'GROQ_API_KEY': 'chave-de-teste'})
     @patch('apps.lists.services.assistente._cliente_groq')
@@ -426,3 +437,83 @@ class FerramentasDeComprasTests(TestCase):
     @patch.dict('os.environ', {'TAVILY_API_KEY': ''})
     def test_buscar_promocoes_sem_chave(self):
         self.assertIn('erro', buscar_promocoes('arroz'))
+
+
+class CartoesDaRespostaTests(TestCase):
+    """Fotos dos produtos e logos das lojas abaixo da resposta."""
+
+    def setUp(self):
+        cache.clear()
+        usuario = User.objects.create_user(email='cartoes@exemplo.test', password='senha-de-teste-123')
+        self.client = APIClient()
+        self.client.force_authenticate(usuario)
+        self.assai = Store.objects.create(
+            cnpj='06057223044209', name='SENDAS DISTRIBUIDORA S/A',
+            address='Avenida Rodrigo Otavio, 2595, Crespo, Manaus, AM',
+        )
+
+    @patch.dict('os.environ', SEM_CHAVES)
+    def test_produto_com_preco_e_foto_e_loja_com_logo_e_rota(self):
+        arroz = Product.objects.create(
+            name='Arroz Camil tipo 1', package_size='5 kg', image_url='https://img.exemplo/arroz.jpg',
+        )
+        _preco(arroz, self.assai, '24.90')
+        dados = self.client.post(URL, {'mensagens': [{'papel': 'usuario', 'texto': 'arroz'}]}, format='json').data
+
+        self.assertEqual(dados['produtos'][0]['nome'], 'Arroz Camil tipo 1')
+        self.assertEqual(dados['produtos'][0]['imagem_url'], 'https://img.exemplo/arroz.jpg')
+        self.assertEqual(dados['produtos'][0]['preco'], '24.90')
+        self.assertEqual(dados['produtos'][0]['loja'], 'Assaí Atacadista')
+        loja = dados['lojas'][0]
+        self.assertEqual((loja['marca'], loja['icone']), ('Assaí Atacadista', 'assai'))
+        self.assertIn('google.com/maps/dir', loja['url'])
+
+    @patch.dict('os.environ', SEM_CHAVES)
+    def test_sem_foto_no_produto_usa_um_parecido_do_catalogo(self):
+        _preco(Product.objects.create(name='ARROZ T1 5KG'), self.assai, '23.90')
+        Product.objects.create(name='Arroz Tio João tipo 1', image_url='https://img.exemplo/tio-joao.jpg')
+        Product.objects.create(name='Feijão carioca', image_url='https://img.exemplo/feijao.jpg')
+        dados = self.client.post(URL, {'mensagens': [{'papel': 'usuario', 'texto': 'arroz'}]}, format='json').data
+        imagens = [p['imagem_url'] for p in dados['produtos']]
+        self.assertIn('https://img.exemplo/tio-joao.jpg', imagens)
+        self.assertNotIn('https://img.exemplo/feijao.jpg', imagens)
+
+    @patch.dict('os.environ', SEM_CHAVES)
+    def test_pergunta_sem_produto_nao_traz_cartoes(self):
+        dados = self.client.post(URL, {'mensagens': [{'papel': 'usuario', 'texto': 'onde tem mais barato?'}]}, format='json').data
+        self.assertEqual((dados['produtos'], dados['lojas']), ([], []))
+
+
+class RedePeloNomeTests(TestCase):
+    def test_nomes_do_mapa(self):
+        from apps.products.services.redes import rede_pelo_nome
+        self.assertEqual(rede_pelo_nome('Supermercado DB')[1], 'db')
+        self.assertEqual(rede_pelo_nome('Super DB Cachoeirinha')[1], 'db')
+        self.assertEqual(rede_pelo_nome('Atacadão')[1], 'atacadao')
+        self.assertEqual(rede_pelo_nome('Assaí Atacadista Crespo')[1], 'assai')
+        self.assertEqual(rede_pelo_nome('Carrefour Bairro')[1], 'carrefour')
+        self.assertEqual(rede_pelo_nome('Supermercado Fuji'), (None, None))
+        self.assertEqual(rede_pelo_nome('Debora Mercadinho'), (None, None))
+
+
+class MercadosPertoNosCartoesTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        usuario = User.objects.create_user(email='perto-cartao@exemplo.test', password='senha-de-teste-123')
+        self.client = APIClient()
+        self.client.force_authenticate(usuario)
+
+    @patch.dict('os.environ', SEM_CHAVES)
+    @patch('apps.lists.services.assistente.mercados_perto')
+    def test_com_localizacao_os_cartoes_trazem_os_mercados_perto(self, mercados):
+        def perto(origem, raio_km, fontes, lojas):
+            lojas.append({'nome': 'Supermercado DB', 'marca': None, 'icone': 'db', 'distancia_km': 0.4, 'url': 'https://m/1'})
+        mercados.side_effect = perto
+        dados = self.client.post(URL, {'mensagens': [{'papel': 'usuario', 'texto': 'arroz'}], 'lat': -3.13, 'lng': -60.02}, format='json').data
+        self.assertEqual(dados['lojas'][0]['nome'], 'Supermercado DB')
+
+    @patch.dict('os.environ', SEM_CHAVES)
+    @patch('apps.lists.services.assistente.mercados_perto')
+    def test_sem_localizacao_nao_busca_mercados(self, mercados):
+        self.client.post(URL, {'mensagens': [{'papel': 'usuario', 'texto': 'arroz'}]}, format='json')
+        mercados.assert_not_called()

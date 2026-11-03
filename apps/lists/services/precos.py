@@ -10,6 +10,7 @@ Regras (docs/PLANO_PRECOS_DA_CIDADE.md):
 
 import time
 from datetime import timedelta
+from urllib.parse import urlencode
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
@@ -106,6 +107,14 @@ def _loja_json(loja, origem=None):
     if origem is not None:
         dados['distancia_km'] = _distancia(loja, origem)
     return dados
+
+
+def link_como_chegar(loja):
+    """Rota no Google Maps até a loja (igual ao "Como chegar" do site)."""
+    destino = f"{loja['nome']}, {loja['endereco']}" if loja.get('endereco') else f"{loja['nome']}, Manaus, AM"
+    return 'https://www.google.com/maps/dir/?' + urlencode({
+        'api': '1', 'destination': destino, 'travelmode': 'driving', 'dir_action': 'navigate',
+    })
 
 
 def _geocodificar_faltantes(lojas):
