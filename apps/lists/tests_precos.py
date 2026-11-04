@@ -69,7 +69,7 @@ class PrecosDaCidadeTests(TestCase):
         self.assertFalse(dados['lojas'][0]['desatualizado'])
 
     def test_vale_o_ultimo_preco_de_cada_loja(self):
-        _preco(self.arroz, self.sendas, '21.00', dias_atras=5)
+        _preco(self.arroz, self.sendas, '21.00', dias_atras=12)
         _preco(self.arroz, self.sendas, '24.90')
 
         dados = self.produto(self.arroz)
@@ -94,7 +94,7 @@ class PrecosDaCidadeTests(TestCase):
         self.assertEqual(resposta.data['dias'], 30)
 
     def test_sem_preco_atual_nao_tem_mais_barato_agora(self):
-        _preco(self.arroz, self.db, '22.90', dias_atras=3)
+        _preco(self.arroz, self.db, '22.90', dias_atras=10)
 
         dados = self.produto(self.arroz)
 
@@ -110,7 +110,7 @@ class PrecosDaCidadeTests(TestCase):
         self.assertEqual(nomes, ['Arroz Camil tipo 1'])
 
     def test_sem_texto_mostra_os_precos_mais_recentes(self):
-        _preco(self.feijao, self.sendas, '8.99', dias_atras=2)
+        _preco(self.feijao, self.sendas, '8.99', dias_atras=9)
         _preco(self.arroz, self.sendas, '24.90')
 
         resposta = self.client.get('/api/lists/precos/')
@@ -192,7 +192,7 @@ class PrecosDaListaTests(TestCase):
         self.assertEqual(melhor[1]['itens'], 1)
 
     def test_conta_precos_desatualizados_da_loja(self):
-        _preco(self.arroz, self.sendas, '24.90', dias_atras=4)
+        _preco(self.arroz, self.sendas, '24.90', dias_atras=11)
 
         self.assertEqual(self.precos()['melhor_loja'][0]['desatualizados'], 1)
 

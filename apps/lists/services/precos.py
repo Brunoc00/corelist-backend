@@ -2,7 +2,7 @@
 
 Regras (docs/PLANO_PRECOS_DA_CIDADE.md):
 - o preço "atual" de uma loja é o último que apareceu numa nota daquela loja;
-- com mais de 1 dia, o preço "pode ter mudado" e não disputa o "mais barato
+- com mais de 7 dias, o preço "pode ter mudado" e não disputa o "mais barato
   agora", mas continua aparecendo com a data;
 - só notas fiscais entram aqui (nunca preço digitado à mão);
 - ninguém vê quem comprou: só loja, preço e data.
@@ -28,7 +28,7 @@ from .busca import pontuar
 from .reconhecer import somente_digitos
 
 # Depois disso, o preço "pode ter mudado".
-VALIDADE_DO_PRECO = timedelta(days=1)
+VALIDADE_DO_PRECO = timedelta(days=7)
 PERIODOS = (7, 30, 90)
 PERIODO_PADRAO = 30
 RAIOS_KM = (2, 5, 10)
