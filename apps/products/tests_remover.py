@@ -6,7 +6,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.lists.models import List, ListItem
-from apps.products.models import ObservedPrice, Product, Store
+from apps.products.models import ObservedPrice, Product, ProdutoDoUsuario, Store
 
 User = get_user_model()
 
@@ -42,8 +42,16 @@ class RemoverProdutoCadastradoPorEnganoTests(TestCase):
         self.client.force_authenticate(self.outro)
         self.assertEqual(self.client.delete(f'/api/products/{produto.id}/').status_code, 403)
         self.assertTrue(Product.objects.filter(pk=produto.id).exists())
-        lista = self.client.get('/api/products/').data
-        self.assertFalse(next(p for p in lista if p['id'] == produto.id)['pode_remover'])
+        # E nem vê o produto na tela dela.
+        self.assertNotIn(produto.id, [p['id'] for p in self.client.get('/api/products/').data])
+
+    def test_nao_apaga_se_outra_pessoa_tambem_tem(self):
+        produto = self.cadastrar()
+        ProdutoDoUsuario.objects.create(usuario=self.outro, produto=produto)
+        dados = self.client.get('/api/products/').data
+        self.assertFalse(next(p for p in dados if p['id'] == produto.id)['pode_remover'])
+        self.assertEqual(self.client.delete(f'/api/products/{produto.id}/').status_code, 409)
+        self.assertTrue(Product.objects.filter(pk=produto.id).exists())
 
     def test_produto_em_lista_nao_sai(self):
         produto = self.cadastrar()
@@ -84,6 +92,8 @@ class EsconderProdutoTests(TestCase):
         self.client = APIClient()
         self.client.force_authenticate(self.pessoa)
         self.antigo = Product.objects.create(name='Arroz antigo')
+        for usuario in (self.pessoa, self.outra):
+            ProdutoDoUsuario.objects.create(usuario=usuario, produto=self.antigo)
 
     def ids(self):
         return [p['id'] for p in self.client.get('/api/products/').data]
@@ -118,3 +128,54 @@ class EsconderProdutoTests(TestCase):
     def test_exige_login(self):
         self.client.force_authenticate(None)
         self.assertEqual(self.client.post(f'/api/products/{self.antigo.id}/esconder/').status_code, 401)
+
+
+class MeusProdutosTests(TestCase):
+    """Cada pessoa tem o próprio catálogo: conta nova começa vazia."""
+
+    def setUp(self):
+        self.eu = User.objects.create_user(email='eu@exemplo.test', password='senha-de-teste-123')
+        self.outro = User.objects.create_user(email='ele@exemplo.test', password='senha-de-teste-123')
+        self.client = APIClient()
+        self.client.force_authenticate(self.eu)
+
+    def ids(self):
+        return [p['id'] for p in self.client.get('/api/products/').data]
+
+    def test_conta_nova_comeca_sem_produtos(self):
+        Product.objects.create(name='Produto antigo de exemplo')
+        self.client.force_authenticate(self.outro)
+        self.client.post('/api/products/', {'name': 'Do outro'}, format='json')
+        self.client.force_authenticate(self.eu)
+        self.assertEqual(self.ids(), [])
+
+    def test_cadastrado_aparece_so_para_quem_cadastrou(self):
+        resposta = self.client.post('/api/products/', {'name': 'Meu arroz'}, format='json')
+        self.assertIn(resposta.data['id'], self.ids())
+        self.client.force_authenticate(self.outro)
+        self.assertNotIn(resposta.data['id'], self.ids())
+
+    def test_usar_numa_lista_poe_nos_meus_produtos(self):
+        produto = Product.objects.create(name='Leite')
+        lista = List.objects.create(name='Mercado', owner=self.eu)
+        ListItem.objects.create(list=lista, product=produto)
+        self.assertIn(produto.id, self.ids())
+
+    def test_adicionar_produto_que_ja_existe(self):
+        produto = Product.objects.create(name='Café', barcode='7891234567895')
+        resposta = self.client.post(f'/api/products/{produto.id}/adicionar/')
+        self.assertEqual(resposta.status_code, 200)
+        self.assertEqual(resposta.data['id'], produto.id)
+        self.assertIn(produto.id, self.ids())
+        # Duas vezes não duplica.
+        self.client.post(f'/api/products/{produto.id}/adicionar/')
+        self.assertEqual(ProdutoDoUsuario.objects.filter(usuario=self.eu, produto=produto).count(), 1)
+
+    def test_lixeira_tira_dos_meus_produtos_e_volta_se_usar_de_novo(self):
+        produto = Product.objects.create(name='Feijão')
+        lista = List.objects.create(name='Mercado', owner=self.eu)
+        ListItem.objects.create(list=lista, product=produto)
+        self.client.post(f'/api/products/{produto.id}/esconder/')
+        self.assertNotIn(produto.id, self.ids())
+        ListItem.objects.create(list=lista, product=produto, quantity=2)
+        self.assertIn(produto.id, self.ids())

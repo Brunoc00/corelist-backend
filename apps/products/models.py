@@ -180,23 +180,25 @@ class ObservedPrice(models.Model):
         return f'{self.product_id} @ {self.store_id}: {self.price} ({self.observed_at:%d/%m/%Y})'
 
 
-class ProdutoEscondido(models.Model):
-    """Produto que a pessoa tirou da própria tela de produtos (lixeira).
+class ProdutoDoUsuario(models.Model):
+    """"Meus produtos": o catálogo que cada pessoa vê (tela de produtos e
+    busca ao adicionar na lista). Entram os produtos que ela cadastrou, usou
+    em alguma lista (inclusive pelas notas) ou trouxe pelo código de barras.
 
-    O catálogo é de todos: esconder não apaga o produto para os outros, nem
-    das listas e dos preços da cidade."""
+    O Product continua um só por baixo (código de barras único e preços da
+    cidade juntos), mas ninguém vê os produtos dos outros."""
 
     usuario = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='+',
     )
     produto = models.ForeignKey(
-        Product, on_delete=models.CASCADE, related_name='escondido_por',
+        Product, on_delete=models.CASCADE, related_name='no_catalogo_de',
     )
     criado_em = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=['usuario', 'produto'], name='produto_escondido_unico',
+                fields=['usuario', 'produto'], name='produto_do_usuario_unico',
             ),
         ]

@@ -7,7 +7,7 @@ from rest_framework.views import APIView
 
 from apps.lists.models import ListItem
 
-from .models import Category, ObservedPrice, Product, ProdutoEscondido
+from .models import Category, ObservedPrice, Product, ProdutoDoUsuario
 from .permissions import CatalogPermission
 from .serializers import CategorySerializer, ProductSerializer
 from .services.openfoodfacts import (
@@ -74,13 +74,19 @@ class ProductListCreateView(generics.ListCreateAPIView):
     permission_classes = [CatalogPermission]
 
     def get_queryset(self):
-        # Some da tela quem a pessoa escondeu com a lixeira.
-        return super().get_queryset().exclude(
-            escondido_por__usuario=self.request.user,
+        # Cada pessoa vê só os próprios produtos ("Meus produtos").
+        usuario = self.request.user
+        return super().get_queryset().filter(
+            no_catalogo_de__usuario=usuario,
+        ).annotate(
+            de_outros=Exists(
+                ProdutoDoUsuario.objects.filter(produto=OuterRef('pk')).exclude(usuario=usuario)
+            ),
         )
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        produto = serializer.save(created_by=self.request.user)
+        ProdutoDoUsuario.objects.get_or_create(usuario=self.request.user, produto=produto)
 
 
 class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -92,6 +98,13 @@ class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
         produto = self.get_object()
         # Quem não é administrador só remove o próprio cadastro feito por
         # engano: produto com preço de nota fiscal alimenta os preços da cidade.
+        if not request.user.is_staff and (
+            ProdutoDoUsuario.objects.filter(produto=produto).exclude(usuario=request.user).exists()
+        ):
+            return Response(
+                {'detail': 'Outra pessoa também usa este produto e ele não pode ser apagado.'},
+                status=status.HTTP_409_CONFLICT,
+            )
         if not request.user.is_staff and produto.observed_prices.exists():
             return Response(
                 {
@@ -178,12 +191,24 @@ class ProductBarcodeView(APIView):
 
 class ProductEsconderView(APIView):
     """POST products/<id>/esconder/: a lixeira de um produto que a pessoa não
-    pode apagar (é de outra pessoa, está em lista ou tem preço de nota). O
-    produto sai só da tela de produtos e da busca dela."""
+    pode apagar (outra pessoa também usa, está em lista ou tem preço de nota).
+    Ele sai só dos produtos dela; volta se ela usar de novo numa lista."""
 
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
         produto = get_object_or_404(Product, pk=pk)
-        ProdutoEscondido.objects.get_or_create(usuario=request.user, produto=produto)
+        ProdutoDoUsuario.objects.filter(usuario=request.user, produto=produto).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ProductAdicionarView(APIView):
+    """POST products/<id>/adicionar/: põe nos produtos da pessoa um produto que
+    já existe (ex.: o código de barras lido já estava cadastrado)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        produto = get_object_or_404(Product, pk=pk)
+        ProdutoDoUsuario.objects.get_or_create(usuario=request.user, produto=produto)
+        return Response(ProductSerializer(produto, context={'request': request}).data)

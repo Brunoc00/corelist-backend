@@ -70,6 +70,12 @@ class ProductSerializer(serializers.ModelSerializer):
             return False
         if usuario.is_staff:
             return True
+        # Outra pessoa também tem o produto nos "Meus produtos" dela.
+        de_outros = getattr(produto, 'de_outros', None)
+        if de_outros is None:
+            de_outros = produto.no_catalogo_de.exclude(usuario=usuario).exists()
+        if de_outros:
+            return False
         tem_preco = getattr(produto, 'tem_preco', None)
         if tem_preco is None:
             tem_preco = produto.observed_prices.exists()

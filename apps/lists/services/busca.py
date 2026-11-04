@@ -99,7 +99,7 @@ def buscar(usuario, texto):
         produtos = {
             p.id: p
             for p in Product.objects.filter(id__in=mais_comprados)
-            .exclude(escondido_por__usuario=usuario)
+            .filter(no_catalogo_de__usuario=usuario)
         }
         historico = historico_do_usuario(usuario, mais_comprados)
         return [
@@ -109,8 +109,8 @@ def buscar(usuario, texto):
 
     candidatos = [
         (pontuar(texto, produto), produto)
-        for produto in Product.objects.exclude(
-            escondido_por__usuario=usuario,  # tirados com a lixeira
+        for produto in Product.objects.filter(
+            no_catalogo_de__usuario=usuario,  # só os produtos da pessoa
         ).only('id', 'name', 'brand', 'package_size', 'unit')
     ]
     candidatos = [(nota, produto) for nota, produto in candidatos if nota > 0]

@@ -4,7 +4,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from apps.accounts.models import User
-from apps.products.models import Product
+from apps.products.models import Product, ProdutoDoUsuario
 
 from .models import List, ListItem
 
@@ -25,6 +25,8 @@ class BuscaDeProdutosTests(TestCase):
         self.iogurte_nota = Product.objects.create(name='IOG VIG 800G BATIDO', data_source='nfce')
         self.feijao = Product.objects.create(name='Feijão carioca', package_size='1 kg')
         self.cafe = Product.objects.create(name='Café Pilão', package_size='500 g')
+        for produto in (self.arroz, self.arroz_camil, self.iogurte_nota, self.feijao, self.cafe):
+            ProdutoDoUsuario.objects.create(usuario=self.usuario, produto=produto)
 
     def buscar(self, texto):
         return self.client.get('/api/lists/produtos/', {'q': texto})
@@ -85,3 +87,16 @@ class BuscaDeProdutosTests(TestCase):
 
     def test_exige_login(self):
         self.assertEqual(APIClient().get('/api/lists/produtos/', {'q': 'arr'}).status_code, 401)
+
+
+class BuscaSoNosMeusProdutosTests(TestCase):
+    def test_produto_de_outra_pessoa_nao_aparece_na_busca(self):
+        eu = User.objects.create_user(email='eu@exemplo.test', password='senha-de-teste-123')
+        outro = User.objects.create_user(email='ele@exemplo.test', password='senha-de-teste-123')
+        produto = Product.objects.create(name='Biscoito do outro')
+        ListItem.objects.create(list=List.objects.create(owner=outro, name='Dele'), product=produto)
+
+        client = APIClient()
+        client.force_authenticate(eu)
+        self.assertEqual(client.get('/api/lists/produtos/', {'q': 'biscoito'}).data, [])
+        self.assertEqual(client.get('/api/lists/produtos/').data, [])

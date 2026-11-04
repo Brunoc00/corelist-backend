@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from apps.products.models import Category, Product
+from apps.products.models import Category, Product, ProdutoDoUsuario
 
 User = get_user_model()
 
@@ -29,6 +29,7 @@ class ProductTests(TestCase):
             price=27.50,
             category=self.category,
         )
+        ProdutoDoUsuario.objects.create(usuario=self.user, produto=self.product)
 
     def test_user_can_list_products(self):
         response = self.client.get(
