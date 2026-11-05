@@ -13,6 +13,7 @@ mostra abaixo da resposta.
 
 import hashlib
 import json
+import unicodedata
 import logging
 import os
 from urllib.error import HTTPError, URLError
@@ -34,6 +35,15 @@ KM_POR_GRAU = 111.0
 MERCADOS_NO_MAXIMO = 8
 RAIO_PADRAO_KM = 3
 PROMOCOES_NO_MAXIMO = 5
+
+
+def _sem_acento(texto):
+    texto = unicodedata.normalize('NFKD', texto or '')
+    return ''.join(c for c in texto if not unicodedata.combining(c)).strip().lower()
+
+
+def _cidade(endereco):
+    return endereco.get('city') or endereco.get('town') or endereco.get('municipality') or ''
 
 
 def _link_mapa(nome, lat, lng):
@@ -81,9 +91,15 @@ def mercados_perto(origem, raio_km=RAIO_PADRAO_KM, fontes=None, lojas=None):
             return {'erro': 'O mapa de mercados não respondeu agora.'}
         cache.set(chave, lugares, 60 * 60)
 
+    # Só mercados da cidade do app (Manaus): perto do limite da cidade o
+    # mapa também traz lugares de municípios vizinhos.
+    cidade_do_app = _sem_acento(settings.ASSISTENTE_CIDADE)
     mercados, vistos = [], set()
     for lugar in lugares:
         nome = (lugar.get('name') or '').strip()
+        cidade = _cidade(lugar.get('address') or {})
+        if cidade_do_app and cidade and _sem_acento(cidade) != cidade_do_app:
+            continue
         try:
             lat, lng = float(lugar['lat']), float(lugar['lon'])
         except (KeyError, TypeError, ValueError):

@@ -429,6 +429,16 @@ class FerramentasDeComprasTests(TestCase):
         self.assertEqual(fontes[0]['titulo'], 'Atacadão')
         self.assertIn('google.com/maps', fontes[0]['url'])
 
+    def test_mercados_perto_so_da_cidade_do_app(self):
+        elementos = [
+            {'name': 'Supermercado DB', 'lat': '-3.1310', 'lon': '-60.0240', 'address': {'city': 'Manaus'}},
+            {'name': 'Mercado de Iranduba', 'lat': '-3.1320', 'lon': '-60.0240', 'address': {'town': 'Iranduba'}},
+            {'name': 'Mercado sem cidade', 'lat': '-3.1330', 'lon': '-60.0240', 'address': {}},
+        ]
+        with patch('apps.lists.services.ferramentas_compras.urlopen', return_value=self._nominatim(elementos)):
+            dados = mercados_perto((-3.1303, -60.0234), 3, [])
+        self.assertEqual([m['nome'] for m in dados['mercados']], ['Supermercado DB', 'Mercado sem cidade'])
+
     def test_mercados_perto_sem_localizacao(self):
         self.assertIn('erro', mercados_perto(None))
 

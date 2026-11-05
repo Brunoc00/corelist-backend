@@ -212,6 +212,8 @@ REST_FRAMEWORK = {
 ASSISTENTE_IA = os.getenv('ASSISTENTE_IA', 'gemini')
 ASSISTENTE_MODELO = os.getenv('ANTHROPIC_MODEL', 'claude-opus-5-5')
 ASSISTENTE_MODELO_GEMINI = os.getenv('ASSISTENTE_MODELO_GEMINI', 'gemini-3.8-flash')
+# Cidade dos mercados que o assistente mostra (os de outras cidades ficam de fora).
+ASSISTENTE_CIDADE = os.getenv('ASSISTENTE_CIDADE', 'Manaus')
 # Gemini com Google Maps e busca no Google (precisa do faturamento ativo na
 # conta Google; sem ele, o chat cai no modo só com os preços das notas).
 ASSISTENTE_INTERNET = os.getenv('ASSISTENTE_INTERNET', '0') == '1'
