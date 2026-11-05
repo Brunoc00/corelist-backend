@@ -14,6 +14,7 @@ from urllib.parse import urlencode
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
+from django.db.models import Avg, Count, Min
 from django.utils import timezone
 
 from apps.products.models import ObservedPrice, Product, Store
@@ -25,7 +26,7 @@ from apps.products.services.geocodificar import (
 from apps.products.services.redes import rede_da_loja
 
 from .busca import pontuar
-from .reconhecer import somente_digitos
+from .reconhecer import normalizar, somente_digitos
 
 # Depois disso, o preço "pode ter mudado".
 VALIDADE_DO_PRECO = timedelta(days=7)
@@ -233,6 +234,10 @@ def buscar_precos(texto, dias=PERIODO_PADRAO, limite=10, origem=None, raio_km=No
         por_id = {produto.id: produto for produto in Product.objects.filter(id__in=ids)}
         produtos = [por_id[pid] for pid in ids if pid in por_id]
 
+    return _resumos(produtos, dias, origem, raio_km)
+
+
+def _resumos(produtos, dias, origem=None, raio_km=None):
     ultimos = ultimos_por_loja([produto.id for produto in produtos])
     if origem is not None:
         _geocodificar_faltantes({
@@ -249,6 +254,55 @@ def buscar_precos(texto, dias=PERIODO_PADRAO, limite=10, origem=None, raio_km=No
         # Perto de mim: só produtos com alguma loja dentro do raio.
         resumos = [resumo for resumo in resumos if resumo['lojas']]
     return resumos
+
+
+def buscar_precos_flexivel(texto, dias=PERIODO_PADRAO, limite=10, origem=None, raio_km=None):
+    """Como buscar_precos, mas tolera palavras a mais ("café pilão
+    tradicional 250 g" acha "CAFE PILAO 500G"): se nada combinar com todas as
+    palavras, tira as que não aparecem em nenhum produto com preço e, por
+    fim, fica com os produtos que combinam com mais palavras."""
+    resumos = buscar_precos(texto, dias, limite, origem, raio_km)
+    if resumos or not (texto or '').strip():
+        return resumos
+
+    com_preco = list(Product.objects.filter(observed_prices__isnull=False).distinct())
+    palavras = normalizar(texto)
+    uteis = [p for p in palavras if any(pontuar(p, produto) >= 1 for produto in com_preco)]
+    if not uteis:
+        return []
+    if len(uteis) < len(palavras):
+        resumos = buscar_precos(' '.join(uteis), dias, limite, origem, raio_km)
+        if resumos:
+            return resumos
+
+    contagem = []
+    for produto in com_preco:
+        acertos = sum(1 for p in uteis if pontuar(p, produto) >= 1)
+        if acertos:
+            contagem.append((acertos, produto))
+    contagem.sort(key=lambda par: (-par[0], par[1].name.lower()))
+    resumos = _resumos([produto for _, produto in contagem[:limite]], dias, origem, raio_km)
+    if origem is not None and raio_km:
+        resumos = [resumo for resumo in resumos if resumo['lojas']]
+    return resumos
+
+
+def historico_por_loja(produto_id, dias=90):
+    """{(loja_id, medida): {'menor', 'media', 'notas'}} das notas dos últimos dias."""
+    linhas = (
+        ObservedPrice.objects
+        .filter(product_id=produto_id, observed_at__gte=timezone.now() - timedelta(days=dias))
+        .values('store_id', 'measure')
+        .annotate(menor=Min('price'), media=Avg('price'), notas=Count('id'))
+    )
+    return {
+        (linha['store_id'], linha['measure']): {
+            'menor': str(Decimal(linha['menor']).quantize(Decimal('0.01'))),
+            'media': str(Decimal(linha['media']).quantize(Decimal('0.01'))),
+            'notas': linha['notas'],
+        }
+        for linha in linhas
+    }
 
 
 def precos_da_lista(lista):

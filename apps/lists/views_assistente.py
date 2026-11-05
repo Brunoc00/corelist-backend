@@ -20,6 +20,6 @@ class AssistenteView(APIView):
     def post(self, request):
         origem = localizacao(request.data.get('lat'), request.data.get('lng'))
         try:
-            return Response(responder(request.data.get('mensagens'), origem))
+            return Response(responder(request.data.get('mensagens'), origem, request.user))
         except MensagemInvalida as erro:
             return Response({'detail': str(erro)}, status=status.HTTP_400_BAD_REQUEST)

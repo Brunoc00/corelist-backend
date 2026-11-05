@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -6,12 +7,14 @@ import anthropic
 import httpx2
 from django.core.cache import cache
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from rest_framework.test import APIClient
 from rest_framework.throttling import ScopedRateThrottle
 
 from apps.accounts.models import User
 from apps.products.models import Product, Store
 
+from .models import List, ListItem
 from .services.assistente import termo_da_pergunta
 from .services.ferramentas_compras import buscar_promocoes, mercados_perto
 from .tests_precos import _preco
@@ -365,6 +368,16 @@ class AssistenteGroqTests(TestCase):
         self.assertEqual(resposta.data['resposta'], 'pelo Groq')
 
     @patch.dict('os.environ', {**SEM_CHAVES, 'GEMINI_API_KEY': 'chave-de-teste', 'GROQ_API_KEY': 'chave-de-teste'})
+    @patch('apps.lists.services.assistente._cliente_groq')
+    @patch('apps.lists.services.assistente._cliente_gemini')
+    def test_ia_que_falhou_fica_de_lado_por_um_tempo(self, gemini, cliente_groq):
+        gemini.return_value.models.generate_content.side_effect = RuntimeError('muita procura')
+        cliente_groq.return_value.chat.completions.create.return_value = _resposta_groq('pelo Groq')
+        self.perguntar()
+        self.assertEqual(self.perguntar().data['fonte'], 'groq')
+        self.assertEqual(gemini.return_value.models.generate_content.call_count, 1)
+
+    @patch.dict('os.environ', {**SEM_CHAVES, 'GEMINI_API_KEY': 'chave-de-teste', 'GROQ_API_KEY': 'chave-de-teste'})
     @override_settings(ASSISTENTE_IA='groq')
     @patch('apps.lists.services.assistente._cliente_groq')
     @patch('apps.lists.services.assistente._cliente_gemini')
@@ -375,11 +388,14 @@ class AssistenteGroqTests(TestCase):
 
     @patch.dict('os.environ', {**SEM_CHAVES, 'GEMINI_API_KEY': 'chave-de-teste'})
     @patch('apps.lists.services.assistente._cliente_gemini')
-    def test_gemini_tem_as_tres_ferramentas(self, gemini):
+    def test_gemini_tem_as_cinco_ferramentas(self, gemini):
         gemini.return_value.models.generate_content.return_value = SimpleNamespace(text='ok')
         self.perguntar()
         config = gemini.return_value.models.generate_content.call_args.kwargs['config']
-        self.assertEqual([f.__name__ for f in config.tools], ['buscar_precos', 'mercados_perto', 'buscar_promocoes'])
+        self.assertEqual(
+            [f.__name__ for f in config.tools],
+            ['buscar_precos', 'mercados_perto', 'buscar_promocoes', 'minhas_listas', 'meus_gastos'],
+        )
         self.assertIn('Localização da pessoa: não informada', config.system_instruction)
 
 
@@ -517,3 +533,138 @@ class MercadosPertoNosCartoesTests(TestCase):
     def test_sem_localizacao_nao_busca_mercados(self, mercados):
         self.client.post(URL, {'mensagens': [{'papel': 'usuario', 'texto': 'arroz'}]}, format='json')
         mercados.assert_not_called()
+
+
+class AssistenteMaisCertoTests(TestCase):
+    """Busca tolerante, histórico das notas, listas e gastos da pessoa."""
+
+    def setUp(self):
+        cache.clear()
+        self.usuario = User.objects.create_user(email='mais@exemplo.test', password='senha-de-teste-123')
+        self.outro = User.objects.create_user(email='outro-chat@exemplo.test', password='senha-de-teste-123')
+        self.client = APIClient()
+        self.client.force_authenticate(self.usuario)
+        self.assai = Store.objects.create(cnpj='06057223044209', name='SENDAS DISTRIBUIDORA S/A')
+        self.db = Store.objects.create(cnpj='04565289000171', name='DB SUPERMERCADOS')
+        self.cafe = Product.objects.create(name='CAFE PILAO 500G')
+        self.arroz = Product.objects.create(name='Arroz Camil tipo 1', package_size='5 kg')
+
+    def test_busca_flexivel_aceita_palavras_a_mais(self):
+        from .services.precos import buscar_precos, buscar_precos_flexivel
+        _preco(self.cafe, self.assai, '18.90')
+        self.assertEqual(buscar_precos('cafe pilao tradicional 250g'), [])
+        achados = buscar_precos_flexivel('cafe pilao tradicional 250g')
+        self.assertEqual(achados[0]['produto']['name'], 'CAFE PILAO 500G')
+
+    def test_historico_e_loja_que_costuma_ser_mais_barata(self):
+        from .services.assistente import resultado_da_busca
+        _preco(self.arroz, self.assai, '24.90')
+        _preco(self.arroz, self.assai, '22.90', dias_atras=20)
+        _preco(self.arroz, self.db, '23.50')
+        produto = resultado_da_busca('arroz')['produtos'][0]
+        assai = next(l for l in produto['lojas'] if l['loja'] == 'Assaí Atacadista')
+        self.assertEqual(assai['historico_90_dias'], {'menor': '22.90', 'media': '23.90', 'notas': 2})
+        # O DB tem o menor preço agora, mas só uma nota: quem costuma ser mais barato é o Assaí.
+        self.assertEqual(produto['lojas'][0]['loja'], 'DB Supermercados')
+        self.assertEqual(produto['loja_que_costuma_ser_mais_barata']['loja'], 'Assaí Atacadista')
+
+    def test_minhas_listas_mostra_so_as_da_pessoa(self):
+        from .services.assistente import executar, nova_coleta
+        _preco(self.arroz, self.assai, '24.90')
+        minha = List.objects.create(owner=self.usuario, name='Mês', budget=Decimal('100'))
+        ListItem.objects.create(list=minha, product=self.arroz, quantity=2, price=Decimal('25'))
+        List.objects.create(owner=self.outro, name='Lista do outro')
+
+        dados = executar('minhas_listas', {}, None, nova_coleta(), self.usuario)
+
+        self.assertEqual([l['nome'] for l in dados['listas']], ['Mês'])
+        lista = dados['listas'][0]
+        self.assertEqual((lista['total_planejado'], lista['saldo']), ('50.00', '50.00'))
+        self.assertEqual(lista['melhor_loja_para_a_lista']['loja'], 'Assaí Atacadista')
+        self.assertEqual(lista['itens'][0]['mais_barato_agora']['preco'], '24.90')
+
+    def test_meus_gastos(self):
+        from .services.assistente import executar, nova_coleta
+        agora = timezone.now()
+        dentro = List.objects.create(
+            owner=self.usuario, name='Feira', budget=Decimal('30'), is_completed=True, completed_at=agora,
+        )
+        ListItem.objects.create(list=dentro, product=self.arroz, quantity=2, price=Decimal('10'))
+        ListItem.objects.create(list=dentro, product=self.cafe, quantity=1, price=Decimal('5'))
+        estourou = List.objects.create(
+            owner=self.usuario, name='Mês', budget=Decimal('10'), is_completed=True, completed_at=agora,
+        )
+        ListItem.objects.create(list=estourou, product=self.arroz, quantity=1, price=Decimal('20'))
+        alheia = List.objects.create(owner=self.outro, name='Dele', is_completed=True, completed_at=agora)
+        ListItem.objects.create(list=alheia, product=self.arroz, quantity=9, price=Decimal('99'))
+
+        dados = executar('meus_gastos', {'meses': 1}, None, nova_coleta(), self.usuario)
+
+        self.assertEqual(dados['total_gasto'], '45.00')
+        self.assertEqual(dados['compras_concluidas'], 2)
+        self.assertEqual((dados['compras_com_orcamento'], dados['compras_dentro_do_orcamento']), (2, 1))
+        self.assertEqual(dados['mais_comprados'][0]['produto'], 'Arroz Camil tipo 1')
+
+    def test_ferramentas_da_pessoa_sem_usuario(self):
+        from .services.assistente import executar, nova_coleta
+        self.assertIn('erro', executar('minhas_listas', {}, None, nova_coleta()))
+
+    def test_perguntas_sobre_lista_e_gastos_nao_viram_produto(self):
+        self.assertEqual(termo_da_pergunta('Em qual mercado minha lista sai mais barata?'), '')
+        self.assertEqual(termo_da_pergunta('Quanto gastei este mês?'), '')
+        self.assertEqual(termo_da_pergunta('qual mercado vende café mais em conta'), 'cafe')
+
+    @patch.dict('os.environ', {**SEM_CHAVES, 'GROQ_API_KEY': 'chave-de-teste'})
+    @patch('apps.lists.services.assistente._cliente_groq')
+    def test_pre_busca_vai_no_prompt_e_busca_uma_vez_so(self, cliente):
+        from .services import assistente
+        _preco(self.arroz, self.assai, '24.90')
+        criar = cliente.return_value.chat.completions.create
+        criar.return_value = _resposta_groq('No Assaí, R$ 24,90.')
+
+        with patch.object(assistente, 'buscar_precos_flexivel', wraps=assistente.buscar_precos_flexivel) as busca:
+            resposta = self.client.post(
+                URL, {'mensagens': [{'papel': 'usuario', 'texto': 'onde tem arroz mais barato?'}]}, format='json',
+            )
+
+        self.assertEqual(resposta.data['fonte'], 'groq')
+        sistema = criar.call_args.kwargs['messages'][0]['content']
+        self.assertIn('Dados já buscados pelo app', sistema)
+        self.assertIn('24.90', sistema)
+        self.assertEqual(criar.call_count, 1)
+        self.assertEqual(busca.call_count, 1)  # os cartões reaproveitam a pré-busca
+        self.assertEqual(resposta.data['produtos'][0]['nome'], 'Arroz Camil tipo 1')
+
+    @patch.dict('os.environ', {**SEM_CHAVES, 'GROQ_API_KEY': 'chave-de-teste'})
+    @patch('apps.lists.services.assistente._cliente_groq')
+    def test_groq_chama_minhas_listas_com_o_usuario_da_pergunta(self, cliente):
+        List.objects.create(owner=self.usuario, name='Churrasco')
+        List.objects.create(owner=self.outro, name='Lista do outro')
+        criar = cliente.return_value.chat.completions.create
+        criar.side_effect = [
+            _resposta_groq(chamadas=[_chamada('c1', 'minhas_listas', {})]),
+            _resposta_groq('Sua lista Churrasco está vazia.'),
+        ]
+        self.client.post(
+            URL, {'mensagens': [{'papel': 'usuario', 'texto': 'Em qual mercado minha lista sai mais barata?'}]},
+            format='json',
+        )
+        resultado = json.loads(criar.call_args_list[1].kwargs['messages'][-1]['content'])
+        self.assertEqual([l['nome'] for l in resultado['listas']], ['Churrasco'])
+        # Pergunta sem produto: nada de pré-busca no prompt.
+        self.assertNotIn('Dados já buscados pelo app', criar.call_args_list[0].kwargs['messages'][0]['content'])
+
+    @patch.dict('os.environ', SEM_CHAVES)
+    def test_sem_ia_responde_sobre_gastos_e_listas(self):
+        compra = List.objects.create(
+            owner=self.usuario, name='Feira', budget=Decimal('30'), is_completed=True, completed_at=timezone.now(),
+        )
+        ListItem.objects.create(list=compra, product=self.arroz, quantity=2, price=Decimal('10'))
+        gastos = self.client.post(URL, {'mensagens': [{'papel': 'usuario', 'texto': 'Quanto gastei este mês?'}]}, format='json')
+        self.assertIn('R$ 20,00 em 1 compra', gastos.data['resposta'])
+        self.assertIn('1 de 1 ficaram dentro do orçamento', gastos.data['resposta'])
+
+        lista = List.objects.create(owner=self.usuario, name='Churrasco', budget=Decimal('100'))
+        ListItem.objects.create(list=lista, product=self.arroz, quantity=1, price=Decimal('25'))
+        resposta = self.client.post(URL, {'mensagens': [{'papel': 'usuario', 'texto': 'quanto vai dar minha lista?'}]}, format='json')
+        self.assertIn('Na lista Churrasco, o total planejado é R$ 25,00 e sobram R$ 75,00', resposta.data['resposta'])
