@@ -212,6 +212,9 @@ REST_FRAMEWORK = {
 ASSISTENTE_IA = os.getenv('ASSISTENTE_IA', 'gemini')
 ASSISTENTE_MODELO = os.getenv('ANTHROPIC_MODEL', 'claude-opus-5-5')
 ASSISTENTE_MODELO_GEMINI = os.getenv('ASSISTENTE_MODELO_GEMINI', 'gemini-3.8-flash')
+# O assistente usa só os preços das notas fiscais. Com ASSISTENTE_PROMOCOES=1,
+# também busca promoções na internet (Tavily) como complemento.
+ASSISTENTE_PROMOCOES = os.getenv('ASSISTENTE_PROMOCOES', '0') == '1'
 # Cidade dos mercados que o assistente mostra (os de outras cidades ficam de fora).
 ASSISTENTE_CIDADE = os.getenv('ASSISTENTE_CIDADE', 'Manaus')
 # Gemini com Google Maps e busca no Google (precisa do faturamento ativo na

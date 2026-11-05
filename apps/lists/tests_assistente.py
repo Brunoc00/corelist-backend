@@ -388,14 +388,15 @@ class AssistenteGroqTests(TestCase):
 
     @patch.dict('os.environ', {**SEM_CHAVES, 'GEMINI_API_KEY': 'chave-de-teste'})
     @patch('apps.lists.services.assistente._cliente_gemini')
-    def test_gemini_tem_as_cinco_ferramentas(self, gemini):
+    def test_gemini_usa_so_as_ferramentas_das_notas(self, gemini):
         gemini.return_value.models.generate_content.return_value = SimpleNamespace(text='ok')
         self.perguntar()
         config = gemini.return_value.models.generate_content.call_args.kwargs['config']
         self.assertEqual(
             [f.__name__ for f in config.tools],
-            ['buscar_precos', 'mercados_perto', 'buscar_promocoes', 'minhas_listas', 'meus_gastos'],
+            ['buscar_precos', 'mercados_perto', 'minhas_listas', 'meus_gastos'],
         )
+        self.assertNotIn('buscar_promocoes', config.system_instruction)
         self.assertIn('Localização da pessoa: não informada', config.system_instruction)
 
 
@@ -678,3 +679,41 @@ class AssistenteMaisCertoTests(TestCase):
         ListItem.objects.create(list=lista, product=self.arroz, quantity=1, price=Decimal('25'))
         resposta = self.client.post(URL, {'mensagens': [{'papel': 'usuario', 'texto': 'quanto vai dar minha lista?'}]}, format='json')
         self.assertIn('Na lista Churrasco, o total planejado é R$ 25,00 e sobram R$ 75,00', resposta.data['resposta'])
+
+
+class PromocoesDaInternetTests(TestCase):
+    """Por padrão o assistente usa só as notas; a internet é opcional."""
+
+    def setUp(self):
+        cache.clear()
+        usuario = User.objects.create_user(email='promo@exemplo.test', password='senha-de-teste-123')
+        self.client = APIClient()
+        self.client.force_authenticate(usuario)
+
+    def perguntar(self):
+        return self.client.post(URL, {'mensagens': [{'papel': 'usuario', 'texto': 'onde tem arroz mais barato?'}]}, format='json')
+
+    @patch.dict('os.environ', {**SEM_CHAVES, 'GROQ_API_KEY': 'chave-de-teste', 'TAVILY_API_KEY': 'chave-de-teste'})
+    @patch('apps.lists.services.ferramentas_compras._cliente_tavily')
+    @patch('apps.lists.services.assistente._cliente_groq')
+    def test_sem_internet_por_padrao(self, cliente, tavily):
+        criar = cliente.return_value.chat.completions.create
+        criar.return_value = _resposta_groq('Ainda não tenho nota com arroz.')
+        self.perguntar()
+        tavily.return_value.search.assert_not_called()
+        nomes = [f['function']['name'] for f in criar.call_args.kwargs['tools']]
+        self.assertNotIn('buscar_promocoes', nomes)
+        self.assertNotIn('promocoes_na_internet', criar.call_args.kwargs['messages'][0]['content'])
+
+    @override_settings(ASSISTENTE_PROMOCOES=True)
+    @patch.dict('os.environ', {**SEM_CHAVES, 'GROQ_API_KEY': 'chave-de-teste', 'TAVILY_API_KEY': 'chave-de-teste'})
+    @patch('apps.lists.services.ferramentas_compras._cliente_tavily')
+    @patch('apps.lists.services.assistente._cliente_groq')
+    def test_com_a_configuracao_ligada_busca_na_internet(self, cliente, tavily):
+        tavily.return_value.search.return_value = {'results': []}
+        criar = cliente.return_value.chat.completions.create
+        criar.return_value = _resposta_groq('ok')
+        self.perguntar()
+        tavily.return_value.search.assert_called_once()
+        nomes = [f['function']['name'] for f in criar.call_args.kwargs['tools']]
+        self.assertIn('buscar_promocoes', nomes)

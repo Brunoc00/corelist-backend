@@ -56,28 +56,33 @@ MAX_FONTES = 8
 MAX_PRODUTOS = 3
 MAX_LOJAS = 5
 
-SISTEMA = """Você é o assistente de compras do CompraFácil, um app de lista de compras de Manaus (AM).
-Você ajuda a pessoa a comprar mais barato e a acompanhar as próprias compras. Ferramentas:
+SISTEMA = """Você é o assistente de compras do CompraFácil, um app de Manaus (AM) que mostra onde cada produto está mais barato usando os preços das notas fiscais que as pessoas leem no app.
+Os preços vêm do histórico dessas notas fiscais, nunca da sua memória. Ferramentas:
 - buscar_precos: preços vistos em notas fiscais lidas no app, com o histórico de cada loja (menor preço, média e quantas notas nos últimos 90 dias) e a loja que costuma ser mais barata;
-- mercados_perto: supermercados e atacarejos perto da localização dela (nome, distância, endereço);
-- buscar_promocoes: promoções, encartes e preços publicados na internet para o produto em Manaus;
+- mercados_perto: supermercados e atacarejos perto da pessoa (nome, distância, endereço), só para ela saber onde ficam e traçar a rota: o mapa não tem preços;
 - minhas_listas: as listas de compras em andamento da pessoa (itens, total planejado, saldo do orçamento e a loja mais barata para a lista pelas notas);
 - meus_gastos: quanto a pessoa gastou nas compras concluídas (por mês, por categoria, produtos mais comprados e compras dentro do orçamento).
 
 Como responder:
-- Quando houver "Dados já buscados" abaixo, use-os primeiro: o app já consultou as notas, os mercados perto e a internet para esta pergunta. Só chame ferramentas para o que faltar (por exemplo, outro produto).
-- "Onde tem X mais barato": comece pelo menor preço atual das notas fiscais (loja, preço e data). Para comparar lojas, use o histórico: diga o preço atual de cada loja e qual costuma ser mais barata, com quantas notas. Depois, cite promoções da internet e os mercados mais próximos, com a distância.
-- Se buscar_precos não achar o produto, tente de novo com um nome mais curto (ex.: "café" em vez de "café pilão tradicional 250 g").
+- Quando houver "Dados já buscados" abaixo, use-os primeiro: o app já consultou as notas fiscais (e os mercados perto, se houver localização) para esta pergunta. Só chame ferramentas para o que faltar (por exemplo, outro produto).
+- "Onde tem X mais barato": comece pelo menor preço atual das notas fiscais (loja, preço e data). Para comparar lojas, use o histórico: diga o preço atual de cada loja e qual costuma ser mais barata, com quantas notas.
+- Se buscar_precos não achar o produto, tente de novo com um nome mais curto (ex.: "café" em vez de "café pilão tradicional 250 g"). Se ainda não houver preço, diga que o app ainda não tem nota fiscal com esse produto e convide a pessoa a ler a nota da próxima compra em "Ler nota fiscal", para alimentar os preços da cidade. Você pode citar os mercados mais próximos para ela conferir, deixando claro que não há preço deles nas notas.
 - Perguntas sobre a lista da pessoa ("minha lista", "quanto vou gastar", "em qual mercado minha lista sai mais barata"): chame minhas_listas. Diga o total planejado, o saldo do orçamento e a melhor loja, com quantos itens da lista ela tem preço.
 - Perguntas sobre gastos ("quanto gastei", "o que mais comprei", "fiquei dentro do orçamento"): chame meus_gastos, com o número de meses da pergunta (este mês = 1).
 - Preço de nota fiscal: diga "visto numa nota fiscal em DD/MM". Se "desatualizado": true, avise que pode ter mudado. Preço por kg: "R$ X/kg".
-- Nunca invente mercado, endereço, distância, preço ou valor gasto, nem cite mercados que você conhece de memória: use só o que as ferramentas e os dados devolverem. Se nada achar preço, diga isso e indique os mercados mais próximos que mercados_perto devolveu (atacarejos costumam ser mais baratos), para a pessoa conferir.
-- Preço da internet: diga o nome do site ou do mercado e avise que pode ter mudado ou valer só na promoção. Os trechos de páginas de loja costumam trazer preços de vários produtos misturados. Só use um preço que apareça claramente junto do nome e da embalagem do mesmo produto (ex.: "Arroz Camil 5 kg R$ 22,29"), e escreva a embalagem. Desconfie de preço muito abaixo do normal (ex.: 5 kg de arroz por menos de R$ 10): nesse caso, não use.
-- Só cite mercados e lojas de Manaus. Ignore promoções e lojas de outras cidades ou estados, mesmo que apareçam na internet.
-- Site de rede nacional (ex.: Carrefour, Assaí) pode ter preço diferente na loja de Manaus: avise.
-- Nunca responda só pedindo a localização: primeiro diga o que achou (ou que não achou) nas notas fiscais e na internet. Só no fim, se a pergunta for sobre "perto de mim" e a localização não foi informada, peça para tocar em "Usar minha localização".
+- Nunca invente mercado, endereço, distância, preço ou valor gasto, nem cite mercados que você conhece de memória: use só o que as ferramentas e os dados devolverem.
+- Só cite mercados e lojas de Manaus.
+- Nunca responda só pedindo a localização: primeiro diga o que achou (ou que não achou) nas notas fiscais. Só no fim, se a pergunta for sobre "perto de mim" e a localização não foi informada, peça para tocar em "Usar minha localização".
 - Responda em português do Brasil, em texto simples: poucas frases ou uma lista curta com hífen, sem negrito, sem asteriscos e sem tabelas. Sem links no texto: as fontes aparecem separadas no app.
 - Assuntos fora de compras, listas e gastos: responda em uma frase que você só ajuda com compras."""
+
+# Só com ASSISTENTE_PROMOCOES=1: promoções da internet como complemento.
+REGRAS_PROMOCOES = """
+
+Promoções da internet (complemento, depois dos preços das notas):
+- buscar_promocoes: promoções, encartes e preços publicados na internet para o produto em Manaus. Cite só depois dos preços das notas e diga que veio da internet, com o nome do site ou do mercado, avisando que pode ter mudado ou valer só na promoção.
+- Os trechos de páginas de loja costumam trazer preços de vários produtos misturados. Só use um preço que apareça claramente junto do nome e da embalagem do mesmo produto (ex.: "Arroz Camil 5 kg R$ 22,29"). Desconfie de preço muito abaixo do normal: nesse caso, não use.
+- Ignore promoções de lojas de outras cidades ou estados. Site de rede nacional (ex.: Carrefour, Assaí) pode ter preço diferente na loja de Manaus: avise."""
 
 ESPECIFICACOES = [
     {
@@ -154,6 +159,13 @@ ESPECIFICACOES = [
 ]
 
 
+def especificacoes():
+    """As ferramentas oferecidas à IA (sem a da internet, por padrão)."""
+    if settings.ASSISTENTE_PROMOCOES:
+        return ESPECIFICACOES
+    return [e for e in ESPECIFICACOES if e['name'] != 'buscar_promocoes']
+
+
 class MensagemInvalida(ValueError):
     pass
 
@@ -188,7 +200,8 @@ def preparar_mensagens(mensagens):
 
 def _sistema(origem, dados=None):
     onde = 'informada' if origem else 'não informada'
-    texto = f'{SISTEMA}\n\nData de hoje: {timezone.localdate():%d/%m/%Y}. Localização da pessoa: {onde}.'
+    texto = SISTEMA + (REGRAS_PROMOCOES if settings.ASSISTENTE_PROMOCOES else '')
+    texto += f'\n\nData de hoje: {timezone.localdate():%d/%m/%Y}. Localização da pessoa: {onde}.'
     if dados:
         texto += '\n\nDados já buscados pelo app para esta pergunta (JSON):\n' + json.dumps(
             dados, ensure_ascii=False, default=str,
@@ -288,6 +301,8 @@ def executar(nome, argumentos, origem, coleta, usuario=None):
         dados = resultado_da_busca(argumentos.get('produto', ''), argumentos.get('dias', 30), origem)
     elif nome == 'mercados_perto':
         dados = mercados_perto(origem, argumentos.get('raio_km', 3), coleta['fontes'], coleta['lojas'])
+    elif nome == 'buscar_promocoes' and not settings.ASSISTENTE_PROMOCOES:
+        dados = {'erro': 'Os preços vêm só das notas fiscais: a busca na internet está desligada.'}
     elif nome == 'buscar_promocoes':
         dados = buscar_promocoes(argumentos.get('produto', ''), coleta['fontes'])
     else:
@@ -451,7 +466,8 @@ def responder_com_gemini(mensagens, origem=None, usuario=None, dados=None):
         ],
         config=tipos_gemini.GenerateContentConfig(
             system_instruction=_sistema(origem, dados),
-            tools=[buscar_precos, mercados_perto, buscar_promocoes, minhas_listas, meus_gastos],
+            tools=[buscar_precos, mercados_perto, minhas_listas, meus_gastos]
+            + ([buscar_promocoes] if settings.ASSISTENTE_PROMOCOES else []),
             max_output_tokens=2000,
             automatic_function_calling=tipos_gemini.AutomaticFunctionCallingConfig(
                 maximum_remote_calls=MAX_VOLTAS_DE_FERRAMENTA,
@@ -473,7 +489,7 @@ def responder_com_groq(mensagens, origem=None, usuario=None, dados=None):
         {'type': 'function', 'function': {
             'name': e['name'], 'description': e['description'], 'parameters': e['parameters'],
         }}
-        for e in ESPECIFICACOES
+        for e in especificacoes()
     ]
     conversa = [{'role': 'system', 'content': _sistema(origem, dados)}] + [
         {'role': m['role'], 'content': m['content']} for m in mensagens
@@ -527,7 +543,7 @@ def responder_com_claude(mensagens, origem=None, usuario=None, dados=None):
     coleta = nova_coleta()
     ferramentas = [
         {'name': e['name'], 'description': e['description'], 'strict': True, 'input_schema': e['parameters']}
-        for e in ESPECIFICACOES
+        for e in especificacoes()
     ]
     cliente = _cliente()
     conversa = list(mensagens)
@@ -835,7 +851,9 @@ def responder(mensagens, origem=None, usuario=None):
 
     dados, antes, resumos = None, nova_coleta(), None
     if termo:
-        dados, antes, resumos = pre_busca(termo, origem, com_internet=bool(ias))
+        dados, antes, resumos = pre_busca(
+            termo, origem, com_internet=bool(ias) and settings.ASSISTENTE_PROMOCOES,
+        )
 
     texto, fonte, coleta = None, 'sem_ia', nova_coleta()
     for nome, responder_com_ia in ias:
