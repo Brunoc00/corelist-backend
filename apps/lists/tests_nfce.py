@@ -201,6 +201,8 @@ class NfceApiTests(TestCase):
         tomate = lista.items.get(product__name='TOMATE KG')
         self.assertEqual(tomate.measure, 'kg')
         self.assertEqual(tomate.product.data_source, Product.SOURCE_NFCE)
+        # Produto novo da nota já ganha categoria pelo nome.
+        self.assertEqual(tomate.product.category.name, 'Alimentos')
 
     def test_importar_usa_itens_conferidos(self, urlopen):
         urlopen.return_value = _resposta()

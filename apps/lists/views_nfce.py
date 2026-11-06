@@ -15,6 +15,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.products.models import Product
+from apps.products.services.categorizar import categoria_pelo_nome
 
 from .models import List, ListItem
 from .serializers import (
@@ -148,6 +149,7 @@ class NfceImportarView(APIView):
                     produto = _produto_do_catalogo(nome_item) or Product.objects.create(
                         name=nome_item,
                         data_source=Product.SOURCE_NFCE,
+                        category=categoria_pelo_nome(nome_item),
                     )
                     ListItem.objects.create(
                         list=lista,
@@ -322,6 +324,7 @@ class NfceConcluirNaListaView(APIView):
                             or _produto_do_catalogo(nome)
                             or Product.objects.create(
                                 name=nome, data_source=Product.SOURCE_NFCE,
+                                category=categoria_pelo_nome(nome),
                             )
                         )
                         ListItem.objects.create(
