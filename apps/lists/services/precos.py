@@ -200,6 +200,7 @@ def resumo_do_produto(produto, dias=PERIODO_PADRAO, ultimos=None, origem=None, r
             'nome_legivel': produto.nome_legivel,
             'tipo': produto.tipo,
             'foto_fonte': produto.foto_fonte,
+            'foto_credito': produto.foto_credito,
         },
         'mais_barato_agora': mais_barato,
         'menor_no_periodo': (

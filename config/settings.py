@@ -215,6 +215,9 @@ ASSISTENTE_MODELO_GEMINI = os.getenv('ASSISTENTE_MODELO_GEMINI', 'gemini-3.8-fla
 # Produtos das notas ganham nome legível, tipo e foto em segundo plano
 # (apps/lists/services/enriquecer.py). ENRIQUECER_PRODUTOS=0 desliga.
 ENRIQUECER_PRODUTOS = os.getenv('ENRIQUECER_PRODUTOS', '1') == '1'
+# Foto da embalagem na internet (Tavily, sites de mercados) quando a base
+# aberta não tem. FOTOS_DA_INTERNET=0 desliga.
+FOTOS_DA_INTERNET = os.getenv('FOTOS_DA_INTERNET', '1') == '1'
 # O assistente usa só os preços das notas fiscais. Com ASSISTENTE_PROMOCOES=1,
 # também busca promoções na internet (Tavily) como complemento.
 ASSISTENTE_PROMOCOES = os.getenv('ASSISTENTE_PROMOCOES', '0') == '1'

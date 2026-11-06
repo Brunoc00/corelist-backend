@@ -23,7 +23,7 @@ import threading
 import time
 import unicodedata
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from django.conf import settings
@@ -42,6 +42,33 @@ LOTE_DA_IA = 25
 PAUSA_ENTRE_BUSCAS = 6.5     # segundos: 10 buscas por minuto
 TIMEOUT_DA_BUSCA = 10
 SEMELHANCA_MINIMA = 0.6
+
+# Sem foto na base aberta: foto da embalagem achada na internet (Tavily),
+# primeiro em sites de mercados do Brasil. Só entra uma imagem cuja descrição
+# tenha a marca e a variação do produto; o site vai no crédito.
+FONTE_INTERNET = 'internet'
+SITES_DE_MERCADO = [
+    'carrefour.com.br', 'paodeacucar.com', 'extra.com.br', 'atacadao.com.br',
+    'assai.com.br', 'tendaatacado.com.br', 'amazon.com.br', 'mercadolivre.com.br',
+    'americanas.com.br', 'drogasil.com.br', 'drogaraia.com.br', 'magazineluiza.com.br',
+]
+# De onde a imagem pode vir: site brasileiro (.br) ou serviço de imagens
+# usado pelas lojas online daqui. Fora isso (vídeos, redes sociais, sites de
+# outros países), a imagem é descartada.
+SERVICOS_DE_IMAGEM_DE_LOJA = (
+    'vtexassets.com', 'vteximg.com.br', 'mlstatic.com', 'media-amazon.com',
+    'ssl-images-amazon.com', 'raiadrogasil.io', 'fbitsstatic.net', 'mercafacil.com',
+    'agilecdn.com.br', 'awsli.com.br', 'mlcdn.com.br',
+)
+
+
+def site_permitido(site):
+    site = site.lower()
+    return site.endswith('.br') or any(site == s or site.endswith('.' + s) for s in SERVICOS_DE_IMAGEM_DE_LOJA)
+
+
+# Imagens com vários produtos juntos não servem como foto de um produto.
+IMAGEM_COM_VARIOS = ('grid', 'collage', 'assortment', 'several', 'variety of', 'multiple')
 
 # Sem foto exata: foto ilustrativa do tipo (a da página da Wikipédia,
 # imagens do Wikimedia Commons em licença livre).
@@ -407,6 +434,91 @@ def usar_foto_do_tipo(produto):
     return True
 
 
+def _cliente_tavily():
+    from tavily import TavilyClient
+    return TavilyClient(api_key=os.getenv('TAVILY_API_KEY'))
+
+
+def _palavras_que_distinguem(produto):
+    """Palavras do nome que dizem qual é a variação ("erva", "doce",
+    "lavanda", "batido"), sem o tipo, a marca, o tamanho e palavras curtas."""
+    ignorar = set(_sem_acento(tipo_do_produto(produto)).split()) | set(_sem_acento(produto.brand).split())
+    palavras = []
+    for palavra in _sem_tamanho(produto.nome_legivel or produto.name).split():
+        palavra = _sem_acento(palavra)
+        if len(palavra) >= 4 and palavra not in ignorar and not palavra.isdigit():
+            palavras.append(palavra)
+    return palavras
+
+
+def _imagem_serve(produto, descricao):
+    """A descrição da imagem (em inglês, feita pelo Tavily) fala deste
+    produto? Marca obrigatória e ao menos metade das palavras da variação."""
+    texto = _sem_acento(descricao)
+    if not texto or any(sinal in texto for sinal in IMAGEM_COM_VARIOS):
+        return False
+    marca = _sem_acento(produto.brand).split()
+    if not marca or marca[0] not in texto:
+        return False
+    variacao = _palavras_que_distinguem(produto)
+    if variacao:
+        achadas = sum(1 for palavra in variacao if palavra[:5] in texto)
+        if achadas * 2 < len(variacao):
+            return False
+    tamanho = tamanho_normalizado(produto.package_size or produto.nome_legivel or produto.name)
+    numero = re.match(r'\d+(\.\d+)?', tamanho)
+    if numero and re.search(r'\d', texto) and numero.group(0) not in texto.replace(',', '.'):
+        return False
+    return True
+
+
+def foto_da_internet(produto):
+    """(endereço da imagem, site) ou None. Sem TAVILY_API_KEY, None."""
+    if not os.getenv('TAVILY_API_KEY') or not settings.FOTOS_DA_INTERNET:
+        return None
+    if not produto.brand:
+        return None  # sem marca, não dá para conferir a imagem
+    termo = ' '.join(filter(None, [produto.nome_legivel or produto.name, produto.brand]))
+    for dominios in (SITES_DE_MERCADO, None):
+        try:
+            resposta = _cliente_tavily().search(
+                termo,
+                max_results=5,
+                search_depth='basic',
+                include_images=True,
+                include_image_descriptions=True,
+                **({'include_domains': dominios} if dominios else {'country': 'brazil'}),
+            )
+        except Exception as erro:  # rede, limite do plano grátis, chave inválida
+            logger.warning('Busca de foto na internet falhou: %s', erro)
+            return None
+        for imagem in (resposta or {}).get('images') or []:
+            if isinstance(imagem, str):
+                continue  # sem descrição não dá para conferir
+            endereco = (imagem.get('url') or '').strip()
+            site = re.sub(r'^www\.', '', urlparse(endereco).netloc)
+            if (
+                endereco.startswith('https://')
+                and site_permitido(site)
+                and _imagem_serve(produto, imagem.get('description') or '')
+            ):
+                return endereco[:500], site[:100]
+    return None
+
+
+def usar_foto_da_internet(produto):
+    """Procura (uma vez) a foto da embalagem na internet; True se achou."""
+    achada = foto_da_internet(produto)
+    produto.foto_internet_buscada_em = timezone.now()
+    campos = ['foto_internet_buscada_em', 'updated_at']
+    if achada:
+        produto.image_url, produto.foto_credito = achada
+        produto.foto_fonte = FONTE_INTERNET
+        campos += ['image_url', 'foto_credito', 'foto_fonte']
+    produto.save(update_fields=campos)
+    return bool(achada)
+
+
 # --- Junta tudo --------------------------------------------------------------------
 
 def enriquecer_produtos(ids, com_fotos=True, esperar=True):
@@ -418,7 +530,13 @@ def enriquecer_produtos(ids, com_fotos=True, esperar=True):
         for produto in produtos:
             if not produto.image_url and produto.foto_buscada_em is None:
                 fotos += buscar_foto(produto, esperar=esperar)
-        # Quem ficou sem foto exata (já procurada) ganha a ilustrativa do tipo.
+        # Sem foto na base aberta (ou só com a ilustrativa): foto da embalagem
+        # na internet, uma vez por produto.
+        for produto in produtos:
+            sem_foto_da_embalagem = not produto.image_url or produto.foto_fonte == FONTE_ILUSTRATIVA
+            if sem_foto_da_embalagem and produto.foto_buscada_em is not None and produto.foto_internet_buscada_em is None:
+                fotos += usar_foto_da_internet(produto)
+        # Quem ainda ficou sem foto ganha a ilustrativa do tipo.
         for produto in produtos:
             if not produto.image_url and produto.foto_buscada_em is not None:
                 fotos += usar_foto_do_tipo(produto)

@@ -48,12 +48,13 @@ class ProductSerializer(serializers.ModelSerializer):
             'tipo',
             'nome_legivel',
             'foto_fonte',
+            'foto_credito',
             'created_at',
             'updated_at',
             'pode_remover',
         ]
         # Preenchidos sozinhos a partir das notas fiscais.
-        read_only_fields = ['tipo', 'nome_legivel', 'foto_fonte']
+        read_only_fields = ['tipo', 'nome_legivel', 'foto_fonte', 'foto_credito']
         # A unicidade do código é checada em validate_barcode, com mensagem
         # em português.
         validators = []

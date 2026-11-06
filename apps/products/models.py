@@ -79,6 +79,9 @@ class Product(models.Model):
     # no crédito da tela. foto_buscada_em evita procurar de novo.
     foto_fonte = models.CharField(max_length=20, blank=True)
     foto_buscada_em = models.DateTimeField(null=True, blank=True)
+    # Foto achada na internet (sites de mercados): o site vai no crédito.
+    foto_credito = models.CharField(max_length=100, blank=True)
+    foto_internet_buscada_em = models.DateTimeField(null=True, blank=True)
     # Quem cadastrou pela tela de produtos: pode remover um cadastro feito por
     # engano (se o produto não estiver em lista nem tiver preço de nota).
     created_by = models.ForeignKey(

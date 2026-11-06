@@ -220,3 +220,58 @@ class FotoIlustrativaTests(TestCase):
         cebola.refresh_from_db()
         self.assertEqual(resultado['fotos'], 1)
         self.assertEqual(cebola.foto_fonte, 'wikipedia')
+
+
+@patch.dict('os.environ', {**SEM_CHAVES, 'TAVILY_API_KEY': 'chave-de-teste'})
+class FotoDaInternetTests(TestCase):
+    """Foto da embalagem na internet: marca e variação conferidas na
+    descrição da imagem, só de sites brasileiros ou de lojas."""
+
+    def setUp(self):
+        cache.clear()
+        self.sabonete = Product.objects.create(
+            name='SBT NIVEA 85G ERV DC', tipo='Sabonete', nome_legivel='Sabonete Nivea 85 g Erva doce',
+            brand='Nivea', package_size='85 g',
+        )
+
+    def buscar(self, cliente, imagens):
+        cliente.return_value.search.return_value = {'images': imagens}
+        return enriquecer.usar_foto_da_internet(self.sabonete)
+
+    @patch('apps.lists.services.enriquecer._cliente_tavily')
+    def test_usa_a_imagem_certa_e_guarda_o_site(self, cliente):
+        achou = self.buscar(cliente, [
+            {'url': 'https://www.youtube.com/thumb.jpg', 'description': 'Nivea Erva Doce soap 85g'},  # site não permitido
+            {'url': 'https://http2.mlstatic.com/varios.jpg', 'description': 'A grid of Nivea soaps 85g, erva doce, leite'},
+            {'url': 'https://http2.mlstatic.com/lux.jpg', 'description': 'A Lux soap bar 85g with erva doce'},  # outra marca
+            {'url': 'https://carrefourbrfood.vtexassets.com/nivea.jpg', 'description': 'A green package of Nivea Sabonete Erva Doce, 85g'},
+        ])
+        self.sabonete.refresh_from_db()
+        self.assertTrue(achou)
+        self.assertEqual(self.sabonete.image_url, 'https://carrefourbrfood.vtexassets.com/nivea.jpg')
+        self.assertEqual((self.sabonete.foto_fonte, self.sabonete.foto_credito), ('internet', 'carrefourbrfood.vtexassets.com'))
+        primeira = cliente.return_value.search.call_args_list[0].kwargs
+        self.assertTrue(primeira['include_image_descriptions'])
+        self.assertIn('carrefour.com.br', primeira['include_domains'])
+
+    @patch('apps.lists.services.enriquecer._cliente_tavily')
+    def test_tamanho_diferente_nao_serve_e_so_busca_uma_vez(self, cliente):
+        achou = self.buscar(cliente, [
+            {'url': 'https://loja.com.br/nivea.jpg', 'description': 'Nivea Erva Doce soap bar 90g'},
+        ])
+        self.assertFalse(achou)
+        self.sabonete.refresh_from_db()
+        self.assertEqual(self.sabonete.image_url, '')
+        self.assertIsNotNone(self.sabonete.foto_internet_buscada_em)
+
+    @patch('apps.lists.services.enriquecer._cliente_tavily')
+    def test_sem_marca_nao_busca(self, cliente):
+        tomate = Product.objects.create(name='TOMATE KG', tipo='Tomate')
+        self.assertIsNone(enriquecer.foto_da_internet(tomate))
+        cliente.assert_not_called()
+
+    @override_settings(FOTOS_DA_INTERNET=False)
+    @patch('apps.lists.services.enriquecer._cliente_tavily')
+    def test_desligado_nao_busca(self, cliente):
+        self.assertIsNone(enriquecer.foto_da_internet(self.sabonete))
+        cliente.assert_not_called()
