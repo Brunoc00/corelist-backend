@@ -69,6 +69,16 @@ class Product(models.Model):
         choices=SOURCE_CHOICES,
         default=SOURCE_MANUAL,
     )
+    # Preenchidos sozinhos para os produtos das notas (services/enriquecer.py):
+    # o tipo ("Arroz") agrupa marcas e tamanhos na tela de menor preço; o nome
+    # legível traduz a abreviação da nota ("ARROZ TP1 CAMIL 5KG").
+    tipo = models.CharField(max_length=60, blank=True, db_index=True)
+    nome_legivel = models.CharField(max_length=200, blank=True)
+    enriquecido_em = models.DateTimeField(null=True, blank=True)
+    # Foto achada pelo nome (Open Food Facts / Open Beauty Facts): a base vai
+    # no crédito da tela. foto_buscada_em evita procurar de novo.
+    foto_fonte = models.CharField(max_length=20, blank=True)
+    foto_buscada_em = models.DateTimeField(null=True, blank=True)
     # Quem cadastrou pela tela de produtos: pode remover um cadastro feito por
     # engano (se o produto não estiver em lista nem tiver preço de nota).
     created_by = models.ForeignKey(

@@ -24,6 +24,7 @@ from .serializers import (
     NfceImportSerializer,
     NfceLinkSerializer,
 )
+from .services.enriquecer import enriquecer_em_segundo_plano
 from .services.nfce import LinkInvalido, NfceErro, ler_nota
 from .services.precos import registrar_preco
 from .services.reconhecer import (
@@ -175,6 +176,9 @@ class NfceImportarView(APIView):
                         livres.remove(da_nota)
                         aprender(loja, da_nota, produto)
                         registrar_preco(loja, nota, da_nota, produto)
+
+                # Nome legível, tipo e foto: depois de salvar, sem atrasar.
+                enriquecer_em_segundo_plano(lista.items.values_list('product_id', flat=True))
         except IntegrityError:
             # Duas importações da mesma nota ao mesmo tempo.
             return _erro('Esta nota já foi importada.', status.HTTP_409_CONFLICT)
@@ -354,6 +358,9 @@ class NfceConcluirNaListaView(APIView):
                 lista.is_completed = True
                 lista.completed_at = emitida_em
                 lista.save()
+
+                # Nome legível, tipo e foto: depois de salvar, sem atrasar.
+                enriquecer_em_segundo_plano(lista.items.values_list('product_id', flat=True))
         except IntegrityError:
             return _erro('Esta nota já foi importada.', status.HTTP_409_CONFLICT)
 

@@ -11,7 +11,13 @@ from .views import (ListDetailView, ListListCreateView, ListItemListCreateView,
                     ListRepetirView,
                     )
 from .views_assistente import AssistenteView
-from .views_precos import OndeEstouView, PrecosBuscaView, PrecosDaListaView, PrecosProdutoView
+from .views_precos import (
+    OndeEstouView,
+    PrecosBuscaView,
+    PrecosDaListaView,
+    PrecosProdutoView,
+    PrecosTiposView,
+)
 from .views_nfce import (
     NfceConcluirNaListaView,
     NfceImportarView,
@@ -34,6 +40,7 @@ urlpatterns = [
     path('produtos/', ProdutoBuscaView.as_view(), name='produto-busca'),
     path('assistente/', AssistenteView.as_view(), name='assistente'),
     path('precos/', PrecosBuscaView.as_view(), name='precos-busca'),
+    path('precos/tipos/', PrecosTiposView.as_view(), name='precos-tipos'),
     path('onde-estou/', OndeEstouView.as_view(), name='onde-estou'),
     path('precos/produto/<int:pk>/', PrecosProdutoView.as_view(), name='precos-produto'),
     path('<int:pk>/precos/', PrecosDaListaView.as_view(), name='lista-precos'),

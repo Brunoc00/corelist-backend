@@ -3,6 +3,10 @@
 - GET lists/precos/?q=arroz&dias=30[&lat=&lng=&raio=5] -> produtos com o mais barato agora e o
                                          menor preço do período;
 - GET lists/precos/produto/<id>/?dias -> preço atual em cada loja;
+- GET lists/precos/tipos/?q=          -> tipos de produto (Arroz, Café...) com
+                                         quantas opções e lojas e o menor preço;
+- GET lists/precos/?tipo=Arroz        -> as opções (marca e tamanho) desse tipo,
+                                         cada uma com as lojas e o preço por kg/L;
 - GET lists/<id>/precos/              -> para a lista em andamento: mais
                                          barato de cada item e melhor loja.
 
@@ -18,6 +22,7 @@ from apps.products.models import Product
 from apps.products.services.geocodificar import endereco_da_coordenada
 
 from .models import List
+from .services.tipos import opcoes_do_tipo, tipos_com_preco
 from .services.precos import (
     buscar_precos,
     localizacao,
@@ -37,11 +42,26 @@ class PrecosBuscaView(APIView):
         # Perto de mim: lat/lng do aparelho (opcional) e raio em km (2, 5, 10).
         origem = localizacao(params.get('lat'), params.get('lng'))
         raio_km = raio(params.get('raio')) if origem else None
+        tipo = (params.get('tipo') or '').strip()[:60]
+        if tipo:
+            return Response({
+                'dias': dias,
+                'raio_km': raio_km,
+                'tipo': tipo,
+                'produtos': opcoes_do_tipo(tipo, dias, origem=origem, raio_km=raio_km),
+            })
         return Response({
             'dias': dias,
             'raio_km': raio_km,
             'produtos': buscar_precos(params.get('q', ''), dias, origem=origem, raio_km=raio_km),
         })
+
+
+class PrecosTiposView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response({'tipos': tipos_com_preco(request.query_params.get('q', ''))})
 
 
 class PrecosProdutoView(APIView):

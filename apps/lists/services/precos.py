@@ -197,6 +197,9 @@ def resumo_do_produto(produto, dias=PERIODO_PADRAO, ultimos=None, origem=None, r
             'brand': produto.brand,
             'embalagem': (produto.package_size or produto.unit or '').strip(),
             'image_url': produto.image_url,
+            'nome_legivel': produto.nome_legivel,
+            'tipo': produto.tipo,
+            'foto_fonte': produto.foto_fonte,
         },
         'mais_barato_agora': mais_barato,
         'menor_no_periodo': (
