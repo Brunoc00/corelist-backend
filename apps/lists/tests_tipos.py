@@ -174,3 +174,49 @@ class EnriquecerDepoisDaNotaTests(TestCase):
         with self.captureOnCommitCallbacks(execute=True):
             enriquecer.enriquecer_em_segundo_plano([1])
         thread.assert_not_called()
+
+
+class FotoIlustrativaTests(TestCase):
+    """Sem foto exata, entra a foto do tipo (Wikipédia), marcada como ilustrativa."""
+
+    def setUp(self):
+        cache.clear()
+
+    def test_usa_a_foto_da_pagina_do_tipo(self):
+        tomate = Product.objects.create(name='TOMATE RASTEIRO KG', tipo='Tomate')
+        resposta = {'type': 'standard', 'thumbnail': {'source': 'https://upload.wikimedia.org/tomate.jpg?utm=1'}}
+        with patch('apps.lists.services.enriquecer.urlopen', side_effect=lambda *a, **k: _resposta_http(resposta)) as abrir:
+            self.assertTrue(enriquecer.usar_foto_do_tipo(tomate))
+            enriquecer.foto_do_tipo('Tomate')  # segunda vez: cache
+        tomate.refresh_from_db()
+        self.assertEqual(tomate.image_url, 'https://upload.wikimedia.org/tomate.jpg')
+        self.assertEqual(tomate.foto_fonte, 'wikipedia')
+        self.assertEqual(abrir.call_count, 1)
+        self.assertIn('pt.wikipedia.org', abrir.call_args.args[0].full_url)
+
+    def test_pagina_de_varios_sentidos_tenta_a_fruta(self):
+        respostas = iter([
+            {'type': 'disambiguation'},
+            {'type': 'standard', 'thumbnail': {'source': 'https://upload.wikimedia.org/kiwi.jpg'}},
+        ])
+        with patch('apps.lists.services.enriquecer.urlopen', side_effect=lambda *a, **k: _resposta_http(next(respostas))) as abrir:
+            self.assertEqual(enriquecer.foto_do_tipo('Kiwi'), 'https://upload.wikimedia.org/kiwi.jpg')
+        self.assertIn('Kiwi_%28fruta%29', abrir.call_args.args[0].full_url)
+
+    def test_nao_troca_foto_que_ja_existe(self):
+        arroz = Product.objects.create(name='ARROZ', tipo='Arroz', image_url='https://x/arroz.jpg')
+        with patch('apps.lists.services.enriquecer.urlopen') as abrir:
+            self.assertFalse(enriquecer.usar_foto_do_tipo(arroz))
+        abrir.assert_not_called()
+
+    def test_depois_da_busca_exata_sem_foto_entra_a_ilustrativa(self):
+        from django.utils import timezone
+        cebola = Product.objects.create(
+            name='CEBOLA SC - KG', tipo='Cebola', enriquecido_em=timezone.now(), foto_buscada_em=timezone.now(),
+        )
+        resposta = {'type': 'standard', 'thumbnail': {'source': 'https://upload.wikimedia.org/cebola.jpg'}}
+        with patch('apps.lists.services.enriquecer.urlopen', side_effect=lambda *a, **k: _resposta_http(resposta)):
+            resultado = enriquecer.enriquecer_produtos([cebola.id], esperar=False)
+        cebola.refresh_from_db()
+        self.assertEqual(resultado['fotos'], 1)
+        self.assertEqual(cebola.foto_fonte, 'wikipedia')

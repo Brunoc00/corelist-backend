@@ -23,7 +23,7 @@ import threading
 import time
 import unicodedata
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 from django.conf import settings
@@ -42,6 +42,18 @@ LOTE_DA_IA = 25
 PAUSA_ENTRE_BUSCAS = 6.5     # segundos: 10 buscas por minuto
 TIMEOUT_DA_BUSCA = 10
 SEMELHANCA_MINIMA = 0.6
+
+# Sem foto exata: foto ilustrativa do tipo (a da página da Wikipédia,
+# imagens do Wikimedia Commons em licença livre).
+WIKIPEDIA_RESUMO = 'https://pt.wikipedia.org/api/rest_v1/page/summary/'
+FONTE_ILUSTRATIVA = 'wikipedia'
+# Tipos cuja página da Wikipédia em português não tem foto (ou tem outro
+# nome). "en:" usa a Wikipédia em inglês.
+TITULO_DA_FOTO = {
+    'flocao': 'Flocos de milho', 'haste': 'Cotonete', 'pimenta de cheiro': 'Capsicum chinense',
+    'racao': 'Ração animal', 'salgadinho': 'Batata chips', 'desodorante': 'en:Deodorant',
+    'locao hidratante': 'en:Moisturizer', 'hidratante': 'en:Moisturizer', 'cobertura': 'Glacê',
+}
 
 BUSCA_DE_FOTOS = {
     # Busca nova do Open Food Facts (aceita nomes parecidos, não exige todas
@@ -338,6 +350,63 @@ def buscar_foto(produto, esperar=True):
     return bool(escolhido)
 
 
+def foto_do_tipo(tipo):
+    """Endereço da foto ilustrativa do tipo ("Tomate"), '' se não houver.
+    Tenta o tipo e, se for uma página de vários sentidos, "(fruta)" e
+    "(alimento)". Cada tipo fica 7 dias em cache."""
+    tipo = (tipo or '').strip()
+    if not tipo:
+        return ''
+    chave = 'foto-tipo:' + hashlib.sha256(_sem_acento(tipo).encode()).hexdigest()
+    guardada = cache.get(chave)
+    if guardada is not None:
+        return guardada
+    foto = ''
+    titulos = [tipo, f'{tipo} (fruta)', f'{tipo} (alimento)']
+    if _sem_acento(tipo) in TITULO_DA_FOTO:
+        titulos.insert(0, TITULO_DA_FOTO[_sem_acento(tipo)])
+    for titulo in titulos:
+        base = WIKIPEDIA_RESUMO
+        if titulo.startswith('en:'):
+            base, titulo = WIKIPEDIA_RESUMO.replace('//pt.', '//en.'), titulo[3:]
+        pedido = Request(
+            base + quote(titulo.replace(' ', '_')),
+            headers={'User-Agent': settings.OPEN_FOOD_FACTS_USER_AGENT},
+        )
+        try:
+            with urlopen(pedido, timeout=TIMEOUT_DA_BUSCA) as resposta:
+                dados = json.loads(resposta.read().decode('utf-8'))
+        except HTTPError as erro:
+            if erro.code == 404:
+                continue
+            logger.warning('Foto do tipo %s na Wikipédia falhou: %s', tipo, erro)
+            return ''
+        except (URLError, TimeoutError, ValueError, OSError) as erro:
+            logger.warning('Foto do tipo %s na Wikipédia falhou: %s', tipo, erro)
+            return ''  # sem cache: tenta de novo depois
+        if dados.get('type') == 'disambiguation':
+            continue
+        endereco = ((dados.get('thumbnail') or {}).get('source') or '').split('?')[0]
+        if endereco.startswith('https://'):
+            foto = endereco[:500]
+            break
+    cache.set(chave, foto, 60 * 60 * 24 * 7)
+    return foto
+
+
+def usar_foto_do_tipo(produto):
+    """Põe a foto ilustrativa do tipo num produto sem foto; True se pôs."""
+    if produto.image_url:
+        return False
+    foto = foto_do_tipo(tipo_do_produto(produto))
+    if not foto:
+        return False
+    produto.image_url = foto
+    produto.foto_fonte = FONTE_ILUSTRATIVA
+    produto.save(update_fields=['image_url', 'foto_fonte', 'updated_at'])
+    return True
+
+
 # --- Junta tudo --------------------------------------------------------------------
 
 def enriquecer_produtos(ids, com_fotos=True, esperar=True):
@@ -349,6 +418,10 @@ def enriquecer_produtos(ids, com_fotos=True, esperar=True):
         for produto in produtos:
             if not produto.image_url and produto.foto_buscada_em is None:
                 fotos += buscar_foto(produto, esperar=esperar)
+        # Quem ficou sem foto exata (já procurada) ganha a ilustrativa do tipo.
+        for produto in produtos:
+            if not produto.image_url and produto.foto_buscada_em is not None:
+                fotos += usar_foto_do_tipo(produto)
     return {'produtos': len(produtos), 'fotos': fotos}
 
 

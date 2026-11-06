@@ -20,7 +20,7 @@ class Command(BaseCommand):
         pendentes = (
             Product.objects
             .filter(Q(data_source=Product.SOURCE_NFCE) | Q(observed_prices__isnull=False))
-            .filter(Q(enriquecido_em__isnull=True) | Q(image_url='', foto_buscada_em__isnull=True))
+            .filter(Q(enriquecido_em__isnull=True) | Q(image_url=''))
             .distinct()
             .order_by('-id')
             .values_list('id', flat=True)[:options['limite']]
