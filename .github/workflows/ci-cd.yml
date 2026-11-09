@@ -179,6 +179,10 @@ jobs:
           echo "$TOKEN" | docker login -u "$USUARIO" --password-stdin
           export IMAGEM_API="$IMAGEM"
           docker compose pull api
+          # A etiqueta :latest do servidor passa a ser esta versão: um
+          # "docker compose up -d" feito à mão (sem IMAGEM_API) sobe a versão
+          # certa, e não uma imagem antiga guardada no servidor.
+          docker tag "$IMAGEM" "${IMAGEM%:*}:latest"
           # Migrações, notas antigas nos preços da cidade (não duplica) e
           # categoria dos produtos das notas e coordenadas das lojas novas
           # (OpenStreetMap, 20 por deploy).
