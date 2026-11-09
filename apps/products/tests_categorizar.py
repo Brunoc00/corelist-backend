@@ -36,3 +36,17 @@ class CategoriaPeloNomeTests(TestCase):
         com.refresh_from_db()
         self.assertEqual(sem.category.name, 'Limpeza')
         self.assertEqual(com.category, limpeza)
+
+
+class SeedComNomesRepetidosTests(TestCase):
+    """O servidor roda seed_products ao ligar: nomes repetidos não podem travar."""
+
+    def test_seed_aguenta_produto_e_categoria_repetidos(self):
+        call_command('seed_products', verbosity=0)
+        primeiro = Product.objects.order_by('id').first()
+        Product.objects.create(name=primeiro.name)  # alguém cadastrou o mesmo nome
+        Category.objects.create(name=primeiro.category.name)
+        total = Product.objects.count()
+        call_command('seed_products', verbosity=0)  # antes: MultipleObjectsReturned
+        self.assertEqual(Product.objects.count(), total)
+        self.assertEqual(nome_da_categoria('SABAO BAR GUAMA 180G'), 'Limpeza')

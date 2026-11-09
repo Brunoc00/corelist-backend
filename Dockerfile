@@ -24,4 +24,4 @@ EXPOSE 8000
 
 # A cada subida: aplica migrações, garante categorias/produtos iniciais
 # (não duplica) e inicia o gunicorn.
-CMD ["sh", "-c", "python manage.py migrate --noinput && python manage.py seed_products && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 60 --access-logfile -"]
+CMD ["sh", "-c", "python manage.py migrate --noinput && (python manage.py seed_products || echo 'seed_products falhou; a API sobe mesmo assim') && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 60 --access-logfile -"]

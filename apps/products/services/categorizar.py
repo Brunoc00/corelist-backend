@@ -105,5 +105,6 @@ def categoria_pelo_nome(nome):
     nome_categoria = nome_da_categoria(nome)
     if nome_categoria is None:
         return None
-    categoria, _ = Category.objects.get_or_create(name=nome_categoria)
-    return categoria
+    # filter().first(): nunca falha se houver duas categorias com o mesmo nome.
+    categoria = Category.objects.filter(name=nome_categoria).order_by('id').first()
+    return categoria or Category.objects.create(name=nome_categoria)

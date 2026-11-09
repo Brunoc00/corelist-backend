@@ -85,26 +85,24 @@ class Command(BaseCommand):
         total_products = 0
 
         for category_name, products in categories.items():
-            category, created = Category.objects.get_or_create(
-                name=category_name,
-            )
-
-            if created:
+            # filter().first(): pode haver nomes repetidos no catálogo (cada
+            # pessoa cadastra os seus); o exemplo nunca pode travar a subida.
+            category = Category.objects.filter(name=category_name).order_by('id').first()
+            if category is None:
+                category = Category.objects.create(name=category_name)
                 total_categories += 1
 
             for product_data in products:
-                product, created = Product.objects.get_or_create(
+                if Product.objects.filter(name=product_data['name']).exists():
+                    continue
+                Product.objects.create(
                     name=product_data['name'],
-                    defaults={
-                        'description': product_data['description'],
-                        'price': product_data['price'],
-                        'unit': product_data['unit'],
-                        'category': category,
-                    },
+                    description=product_data['description'],
+                    price=product_data['price'],
+                    unit=product_data['unit'],
+                    category=category,
                 )
-
-                if created:
-                    total_products += 1
+                total_products += 1
 
         self.stdout.write(
             self.style.SUCCESS(
