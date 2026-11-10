@@ -11,7 +11,11 @@ import re
 import unicodedata
 from decimal import ROUND_HALF_UP, Decimal
 
+from django.db.models import Count
+
 from apps.products.models import Product
+
+from ..models import ListItem
 
 from .busca import pontuar
 from .enriquecer import tamanho_normalizado, tipo_do_produto
@@ -29,6 +33,19 @@ def _chave(texto):
 
 def _produtos_com_preco():
     return list(Product.objects.filter(observed_prices__isnull=False).distinct().select_related('category'))
+
+
+def vezes_que_comprou(usuario, ids):
+    """{produto_id: quantas vezes o produto está nas listas da pessoa}."""
+    if usuario is None or not ids:
+        return {}
+    return dict(
+        ListItem.objects
+        .filter(list__owner=usuario, product_id__in=ids)
+        .values('product_id')
+        .annotate(total=Count('id'))
+        .values_list('product_id', 'total')
+    )
 
 
 def _nome(produto):
@@ -91,8 +108,10 @@ def _agrupar_opcoes(produtos):
     return grupos
 
 
-def tipos_com_preco(texto='', limite=40):
-    """Os tipos com preço nas notas, dos que têm mais opções aos que têm menos."""
+def tipos_com_preco(texto='', limite=40, usuario=None):
+    """Os tipos com preço nas notas, dos que têm mais opções aos que têm menos.
+    Com o usuário, cada tipo diz quantas vezes ele comprou produtos dele
+    ("voce_comprou"); os que ele compra nunca ficam de fora pelo limite."""
     texto = (texto or '').strip()
     por_tipo = {}
     for produto in _produtos_com_preco():
@@ -100,7 +119,9 @@ def tipos_com_preco(texto='', limite=40):
         if tipo and _combina_com_o_texto(texto, tipo, produto):
             por_tipo.setdefault(_chave(tipo), {'tipo': tipo, 'produtos': []})['produtos'].append(produto)
 
-    ultimos = ultimos_por_loja([p.id for grupo in por_tipo.values() for p in grupo['produtos']])
+    ids = [p.id for grupo in por_tipo.values() for p in grupo['produtos']]
+    ultimos = ultimos_por_loja(ids)
+    vezes = vezes_que_comprou(usuario, ids)
     tipos = []
     for grupo in por_tipo.values():
         lojas, precos = set(), []
@@ -119,9 +140,10 @@ def tipos_com_preco(texto='', limite=40):
                 'medida': mais_barato.measure,
             },
             'image_url': foto,
+            'voce_comprou': sum(vezes.get(p.id, 0) for p in grupo['produtos']),
         })
     tipos.sort(key=lambda t: (-t['opcoes'], -t['lojas'], _chave(t['tipo'])))
-    return tipos[:limite]
+    return [t for i, t in enumerate(tipos) if i < limite or t['voce_comprou']]
 
 
 def _juntar_resumos(grupo, resumos_por_id):
@@ -154,16 +176,19 @@ def _juntar_resumos(grupo, resumos_por_id):
     }
 
 
-def opcoes_do_tipo(tipo, dias=PERIODO_PADRAO, origem=None, raio_km=None):
+def opcoes_do_tipo(tipo, dias=PERIODO_PADRAO, origem=None, raio_km=None, usuario=None):
     """As opções (marca e tamanho) de um tipo, da mais barata por kg/L à mais
     cara; quem não tem tamanho conhecido vem no fim, pelo preço."""
     chave = _chave(tipo)
     produtos = [p for p in _produtos_com_preco() if _chave(tipo_do_produto(p)) == chave]
     resumos_por_id = {r['produto']['id']: r for r in _resumos(produtos, dias, origem, raio_km)}
-    opcoes = [
-        opcao for opcao in (_juntar_resumos(g, resumos_por_id) for g in _agrupar_opcoes(produtos))
-        if opcao and opcao['lojas']
-    ]
+    vezes = vezes_que_comprou(usuario, [p.id for p in produtos])
+    opcoes = []
+    for grupo in _agrupar_opcoes(produtos):
+        opcao = _juntar_resumos(grupo, resumos_por_id)
+        if opcao and opcao['lojas']:
+            opcao['voce_comprou'] = sum(vezes.get(p.id, 0) for p in grupo)
+            opcoes.append(opcao)
 
     def ordem(opcao):
         referencia = opcao['mais_barato_agora'] or opcao['lojas'][0]

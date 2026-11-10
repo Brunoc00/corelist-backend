@@ -135,6 +135,24 @@ class MenorPrecoPorTipoTests(TestCase):
         _preco(self.tio_joao, self.db, '6.49')
         _preco(self.cafe, self.assai, '16.90')
 
+    def test_diz_quantas_vezes_a_pessoa_comprou(self):
+        from .models import List, ListItem
+        usuario = User.objects.get(email='tipos@exemplo.test')
+        outro = User.objects.create_user(email='outro-tipos@exemplo.test', password='senha-de-teste-123')
+        for nome in ('Semana 1', 'Semana 2'):
+            lista = List.objects.create(owner=usuario, name=nome, is_completed=True)
+            ListItem.objects.create(list=lista, product=self.camil_db, quantity=1, price='26.50')
+        alheia = List.objects.create(owner=outro, name='Dele')
+        ListItem.objects.create(list=alheia, product=self.cafe, quantity=1)
+
+        tipos = {t['tipo']: t for t in self.client.get('/api/lists/precos/tipos/').data['tipos']}
+        self.assertEqual((tipos['Arroz']['voce_comprou'], tipos['Café']['voce_comprou']), (2, 0))
+
+        opcoes = self.client.get('/api/lists/precos/', {'tipo': 'Arroz'}).data['produtos']
+        vezes = {o['produto']['name']: o['voce_comprou'] for o in opcoes}
+        self.assertEqual(vezes['Arroz Camil Tipo 1 5 kg'], 2)
+        self.assertEqual(vezes['Arroz Tio João Tipo 1 1 kg'], 0)
+
     def test_lista_os_tipos(self):
         tipos = self.client.get('/api/lists/precos/tipos/').data['tipos']
         arroz = next(t for t in tipos if t['tipo'] == 'Arroz')
