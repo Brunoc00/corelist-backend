@@ -1,5 +1,5 @@
 import json
-from io import BytesIO
+from io import BytesIO, StringIO
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -183,14 +183,14 @@ class FotoIlustrativaTests(TestCase):
         cache.clear()
 
     def test_usa_a_foto_da_pagina_do_tipo(self):
-        tomate = Product.objects.create(name='TOMATE RASTEIRO KG', tipo='Tomate')
-        resposta = {'type': 'standard', 'thumbnail': {'source': 'https://upload.wikimedia.org/tomate.jpg?utm=1'}}
+        pepino = Product.objects.create(name='PEPINO JAPONES KG', tipo='Pepino')
+        resposta = {'type': 'standard', 'thumbnail': {'source': 'https://upload.wikimedia.org/pepino.jpg?utm=1'}}
         with patch('apps.lists.services.enriquecer.urlopen', side_effect=lambda *a, **k: _resposta_http(resposta)) as abrir:
-            self.assertTrue(enriquecer.usar_foto_do_tipo(tomate))
-            enriquecer.foto_do_tipo('Tomate')  # segunda vez: cache
-        tomate.refresh_from_db()
-        self.assertEqual(tomate.image_url, 'https://upload.wikimedia.org/tomate.jpg')
-        self.assertEqual(tomate.foto_fonte, 'wikipedia')
+            self.assertTrue(enriquecer.usar_foto_do_tipo(pepino))
+            enriquecer.foto_do_tipo('Pepino')  # segunda vez: cache
+        pepino.refresh_from_db()
+        self.assertEqual(pepino.image_url, 'https://upload.wikimedia.org/pepino.jpg')
+        self.assertEqual(pepino.foto_fonte, 'wikipedia')
         self.assertEqual(abrir.call_count, 1)
         self.assertIn('pt.wikipedia.org', abrir.call_args.args[0].full_url)
 
@@ -275,3 +275,45 @@ class FotoDaInternetTests(TestCase):
     def test_desligado_nao_busca(self, cliente):
         self.assertIsNone(enriquecer.foto_da_internet(self.sabonete))
         cliente.assert_not_called()
+
+
+class FotoEscolhidaDoTipoTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    @patch('apps.lists.services.enriquecer.urlopen')
+    def test_tipo_com_foto_escolhida_nao_usa_a_wikipedia(self, abrir):
+        foto = enriquecer.foto_do_tipo('Limão')
+        self.assertEqual(
+            foto,
+            'https://thumb.wikimedia.org/wikipedia/commons/thumb/6/68/Lime-Whole-Split.jpg/330px-Lime-Whole-Split.jpg',
+        )
+        abrir.assert_not_called()
+
+    def test_caminho_do_commons_igual_ao_do_site(self):
+        self.assertEqual(
+            enriquecer.foto_do_commons('Oranges - whole-halved-segment.jpg'),
+            'https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e3/Oranges_-_whole-halved-segment.jpg/330px-Oranges_-_whole-halved-segment.jpg',
+        )
+
+    def test_troca_so_as_fotos_ilustrativas_dos_tipos_escolhidos(self):
+        mamao = Product.objects.create(
+            name='MAMAO FORMOSA KG', tipo='Mamão', foto_fonte='wikipedia',
+            image_url='https://thumb.wikimedia.org/desenho-antigo.jpg',
+        )
+        com_foto_real = Product.objects.create(
+            name='TOMATE ITALIANO', tipo='Tomate', foto_fonte='openfoodfacts',
+            image_url='https://images.openfoodfacts.org/tomate.jpg',
+        )
+        arroz = Product.objects.create(
+            name='ARROZ KG', tipo='Arroz', foto_fonte='wikipedia', image_url='https://thumb.wikimedia.org/arroz.jpg',
+        )
+
+        from django.core.management import call_command
+        call_command('trocar_fotos_do_tipo', stdout=StringIO())
+
+        for produto in (mamao, com_foto_real, arroz):
+            produto.refresh_from_db()
+        self.assertIn('Papaya_cross_section_BNC.jpg', mamao.image_url)
+        self.assertEqual(com_foto_real.image_url, 'https://images.openfoodfacts.org/tomate.jpg')
+        self.assertEqual(arroz.image_url, 'https://thumb.wikimedia.org/arroz.jpg')

@@ -82,6 +82,31 @@ TITULO_DA_FOTO = {
     'locao hidratante': 'en:Moisturizer', 'hidratante': 'en:Moisturizer', 'cobertura': 'Glacê',
 }
 
+# Foto escolhida à mão (Wikimedia Commons) para tipos cuja página da Wikipédia
+# mostra a planta, um desenho antigo ou outra coisa (a de "Limão" é um bairro
+# de São Paulo). Vale antes da página; sem rede.
+FOTO_DO_TIPO = {
+    'laranja': 'Oranges - whole-halved-segment.jpg',
+    'limao': 'Lime-Whole-Split.jpg',
+    'limao taiti': 'Lime-Whole-Split.jpg',
+    'mamao': 'Papaya cross section BNC.jpg',
+    'tomate': 'Tomato je.jpg',
+    'melancia': 'Watermelon cross BNC.jpg',
+    'cenoura': 'Vegetable-Carrot-Bundle-wStalks.jpg',
+}
+
+
+def foto_do_commons(arquivo, largura=330):
+    """Miniatura de um arquivo do Wikimedia Commons (o caminho vem do MD5 do
+    nome, como o próprio Commons faz)."""
+    nome = arquivo.replace(' ', '_')
+    md5 = hashlib.md5(nome.encode('utf-8')).hexdigest()
+    return (
+        f'https://thumb.wikimedia.org/wikipedia/commons/thumb/{md5[0]}/{md5[:2]}/'
+        f'{quote(nome)}/{largura}px-{quote(nome)}'
+    )
+
+
 BUSCA_DE_FOTOS = {
     # Busca nova do Open Food Facts (aceita nomes parecidos, não exige todas
     # as palavras) e a busca do Open Beauty Facts (higiene e limpeza).
@@ -384,6 +409,8 @@ def foto_do_tipo(tipo):
     tipo = (tipo or '').strip()
     if not tipo:
         return ''
+    if _sem_acento(tipo) in FOTO_DO_TIPO:
+        return foto_do_commons(FOTO_DO_TIPO[_sem_acento(tipo)])
     chave = 'foto-tipo:' + hashlib.sha256(_sem_acento(tipo).encode()).hexdigest()
     guardada = cache.get(chave)
     if guardada is not None:
@@ -419,6 +446,22 @@ def foto_do_tipo(tipo):
             break
     cache.set(chave, foto, 60 * 60 * 24 * 7)
     return foto
+
+
+def trocar_fotos_do_tipo(produtos):
+    """Põe a foto de FOTO_DO_TIPO nos produtos com foto ilustrativa antiga
+    daquele tipo. Devolve quantas trocou."""
+    trocadas = 0
+    for produto in produtos:
+        arquivo = FOTO_DO_TIPO.get(_sem_acento(tipo_do_produto(produto)))
+        if not arquivo or produto.foto_fonte != FONTE_ILUSTRATIVA:
+            continue
+        foto = foto_do_commons(arquivo)
+        if produto.image_url != foto:
+            produto.image_url = foto
+            produto.save(update_fields=['image_url', 'updated_at'])
+            trocadas += 1
+    return trocadas
 
 
 def usar_foto_do_tipo(produto):
