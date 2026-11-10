@@ -394,7 +394,7 @@ class AssistenteGroqTests(TestCase):
         config = gemini.return_value.models.generate_content.call_args.kwargs['config']
         self.assertEqual(
             [f.__name__ for f in config.tools],
-            ['buscar_precos', 'mercados_perto', 'minhas_listas', 'meus_gastos'],
+            ['buscar_precos', 'mercados_perto', 'minhas_listas', 'meus_gastos', 'criar_lista'],
         )
         self.assertNotIn('buscar_promocoes', config.system_instruction)
         self.assertIn('Localização da pessoa: não informada', config.system_instruction)

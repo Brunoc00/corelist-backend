@@ -37,6 +37,7 @@ from google.genai import types as tipos_gemini
 from apps.products.models import Product
 
 from .busca import pontuar
+from .criar_lista import criar_lista, e_pedido_de_lista, itens_do_pedido
 from .ferramentas_compras import buscar_promocoes, mercados_perto
 from .gastos import listas_ativas, resumo_de_gastos
 from .precos import (
@@ -61,7 +62,8 @@ Os preços vêm do histórico dessas notas fiscais, nunca da sua memória. Ferra
 - buscar_precos: preços vistos em notas fiscais lidas no app, com o histórico de cada loja (menor preço, média e quantas notas nos últimos 90 dias) e a loja que costuma ser mais barata;
 - mercados_perto: supermercados e atacarejos perto da pessoa (nome, distância, endereço), só para ela saber onde ficam e traçar a rota: o mapa não tem preços;
 - minhas_listas: as listas de compras em andamento da pessoa (itens, total planejado, saldo do orçamento e a loja mais barata para a lista pelas notas);
-- meus_gastos: quanto a pessoa gastou nas compras concluídas (por mês, por categoria, produtos mais comprados e compras dentro do orçamento).
+- meus_gastos: quanto a pessoa gastou nas compras concluídas (por mês, por categoria, produtos mais comprados e compras dentro do orçamento);
+- criar_lista: cria uma lista de compras nova para a pessoa, com os produtos e quantidades que ela pediu.
 
 Como responder:
 - Quando houver "Dados já buscados" abaixo, use-os primeiro: o app já consultou as notas fiscais (e os mercados perto, se houver localização) para esta pergunta. Só chame ferramentas para o que faltar (por exemplo, outro produto).
@@ -69,6 +71,7 @@ Como responder:
 - Se buscar_precos não achar o produto, tente de novo com um nome mais curto (ex.: "café" em vez de "café pilão tradicional 250 g"). Se ainda não houver preço, diga que o app ainda não tem nota fiscal com esse produto e convide a pessoa a ler a nota da próxima compra em "Ler nota fiscal", para alimentar os preços da cidade. Você pode citar os mercados mais próximos para ela conferir, deixando claro que não há preço deles nas notas.
 - Perguntas sobre a lista da pessoa ("minha lista", "quanto vou gastar", "em qual mercado minha lista sai mais barata"): chame minhas_listas. Diga o total planejado, o saldo do orçamento e a melhor loja, com quantos itens da lista ela tem preço.
 - Perguntas sobre gastos ("quanto gastei", "o que mais comprei", "fiquei dentro do orçamento"): chame meus_gastos, com o número de meses da pergunta (este mês = 1).
+- Pedido para criar ou montar uma lista ("crie uma lista com arroz, feijão e café", "monta minha lista do churrasco"): chame criar_lista uma vez só, com um nome curto, os produtos (nome simples, como a pessoa diria: "arroz", "feijão carioca", "leite") e as quantidades; se ela citar um valor máximo, use como orçamento. Se ela pedir uma lista para uma ocasião sem dizer os itens (ex.: churrasco), escolha poucos itens óbvios, até 10. Depois diga que a lista foi criada, com o nome e os itens, e que ela pode abrir a lista no botão abaixo para ajustar. O total planejado só soma os itens com preço (o último que a pessoa pagou): se "itens_sem_preco" for maior que zero, não apresente esse total como o valor da compra nem diga que cabe no orçamento; diga quantos itens ainda estão sem preço. Só crie lista quando a pessoa pedir.
 - Preço de nota fiscal: diga "visto numa nota fiscal em DD/MM". Se "desatualizado": true, avise que pode ter mudado. Preço por kg: "R$ X/kg".
 - Nunca invente mercado, endereço, distância, preço ou valor gasto, nem cite mercados que você conhece de memória: use só o que as ferramentas e os dados devolverem.
 - Só cite mercados e lojas de Manaus.
@@ -156,7 +159,43 @@ ESPECIFICACOES = [
             'additionalProperties': False,
         },
     },
+    {
+        'name': 'criar_lista',
+        'description': (
+            'Cria uma lista de compras nova (em andamento) para a pessoa, com os '
+            'produtos e quantidades pedidos. Use só quando a pessoa pedir para criar '
+            'ou montar uma lista. Devolve a lista criada com os itens e o preço '
+            'planejado de cada um (o último que a pessoa pagou, quando houver).'
+        ),
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'nome': {'type': 'string', 'description': 'Nome curto da lista (ex.: "Compras da semana", "Churrasco").'},
+                'itens': {
+                    'type': 'array',
+                    'description': 'Produtos da lista, até 30.',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'produto': {'type': 'string', 'description': 'Nome simples do produto (ex.: "arroz", "feijão carioca").'},
+                            'quantidade': {'type': 'number', 'description': 'Quantidade; use 1 se a pessoa não disser.'},
+                        },
+                        'required': ['produto', 'quantidade'],
+                        'additionalProperties': False,
+                    },
+                },
+                'orcamento': {
+                    'type': ['number', 'null'],
+                    'description': 'Valor máximo em reais que a pessoa quer gastar, ou null se ela não disser.',
+                },
+            },
+            'required': ['nome', 'itens', 'orcamento'],
+            'additionalProperties': False,
+        },
+    },
 ]
+
+FERRAMENTAS_DO_USUARIO = ('minhas_listas', 'meus_gastos', 'criar_lista')
 
 
 def especificacoes():
@@ -291,8 +330,15 @@ def nova_coleta():
 def executar(nome, argumentos, origem, coleta, usuario=None):
     """Roda a ferramenta pedida pela IA e devolve um dict serializável."""
     argumentos = argumentos if isinstance(argumentos, dict) else {}
-    if nome in ('minhas_listas', 'meus_gastos') and usuario is None:
+    if nome in FERRAMENTAS_DO_USUARIO and usuario is None:
         dados = {'erro': 'Não sei quem está perguntando.'}
+    elif nome == 'criar_lista' and coleta.get('lista_criada'):
+        # Uma lista por resposta: a IA não cria duas sem querer.
+        dados = {'lista_criada': coleta['lista_criada'], 'aviso': 'A lista já foi criada nesta resposta.'}
+    elif nome == 'criar_lista':
+        dados = criar_lista(usuario, argumentos.get('nome'), argumentos.get('itens'), argumentos.get('orcamento'))
+        if 'lista_criada' in dados:
+            coleta['lista_criada'] = dados['lista_criada']
     elif nome == 'minhas_listas':
         dados = listas_ativas(usuario)
     elif nome == 'meus_gastos':
@@ -455,6 +501,27 @@ def responder_com_gemini(mensagens, origem=None, usuario=None, dados=None):
         """
         return executar('meus_gastos', {'meses': meses}, origem, coleta, usuario)
 
+    def criar_lista(nome: str, produtos: list[str], quantidades: list[float], orcamento: float) -> dict:
+        """Cria uma lista de compras nova para a pessoa, com os produtos e
+        quantidades pedidos. Use só quando a pessoa pedir para criar ou montar
+        uma lista. Devolve a lista criada com os itens.
+
+        Args:
+            nome: nome curto da lista (ex.: "Compras da semana").
+            produtos: nomes simples dos produtos (ex.: ["arroz", "feijão carioca"]), até 30.
+            quantidades: quantidade de cada produto, na mesma ordem (1 se a pessoa não disser).
+            orcamento: valor máximo em reais que a pessoa quer gastar, ou 0 se ela não disser.
+        """
+        quantidades = list(quantidades or [])
+        itens = [
+            {'produto': produto, 'quantidade': quantidades[i] if i < len(quantidades) else 1}
+            for i, produto in enumerate(produtos or [])
+        ]
+        return executar(
+            'criar_lista', {'nome': nome, 'itens': itens, 'orcamento': orcamento or None},
+            origem, coleta, usuario,
+        )
+
     # Guardar o cliente numa variável: se ele for descartado no meio da
     # chamada, a conexão fecha ("client has been closed").
     cliente = _cliente_gemini()
@@ -466,7 +533,7 @@ def responder_com_gemini(mensagens, origem=None, usuario=None, dados=None):
         ],
         config=tipos_gemini.GenerateContentConfig(
             system_instruction=_sistema(origem, dados),
-            tools=[buscar_precos, mercados_perto, minhas_listas, meus_gastos]
+            tools=[buscar_precos, mercados_perto, minhas_listas, meus_gastos, criar_lista]
             + ([buscar_promocoes] if settings.ASSISTENTE_PROMOCOES else []),
             max_output_tokens=2000,
             automatic_function_calling=tipos_gemini.AutomaticFunctionCallingConfig(
@@ -728,7 +795,21 @@ def _sem_ia_listas(usuario):
     return frase
 
 
-def responder_sem_ia(pergunta, origem=None, resumos=None, usuario=None):
+def _sem_ia_criar_lista(usuario, pergunta, coleta):
+    itens = itens_do_pedido(pergunta)
+    if not itens:
+        return 'Me diga os produtos, por exemplo: "crie uma lista com arroz, feijão e café".'
+    dados = executar('criar_lista', {'nome': '', 'itens': itens, 'orcamento': None}, None, coleta, usuario)
+    if 'lista_criada' not in dados:
+        return dados.get('erro') or 'Não consegui criar a lista agora.'
+    lista = dados['lista_criada']
+    nomes = ', '.join(item['produto'] for item in lista['itens'])
+    return f"Criei a lista {lista['nome']} com: {nomes}. Abra a lista no botão abaixo para ajustar."
+
+
+def responder_sem_ia(pergunta, origem=None, resumos=None, usuario=None, coleta=None):
+    if usuario is not None and coleta is not None and e_pedido_de_lista(pergunta):
+        return _sem_ia_criar_lista(usuario, pergunta, coleta)
     # Pergunta sobre os próprios gastos ou listas vem antes do produto.
     simples = ' '.join(re.findall(r'[a-z]+', unicodedata.normalize('NFKD', pergunta.lower())))
     if usuario is not None and 'gast' in simples:
@@ -846,7 +927,8 @@ def responder(mensagens, origem=None, usuario=None):
     'produtos' (com foto), 'lojas' (com logo e rota)}."""
     convertidas = preparar_mensagens(mensagens)
     pergunta = convertidas[-1]['content']
-    termo = termo_da_pergunta(pergunta)
+    # Pedido de lista: os produtos vão para a lista, não para a busca de preços.
+    termo = '' if e_pedido_de_lista(pergunta) else termo_da_pergunta(pergunta)
     ias = ias_disponiveis()
 
     dados, antes, resumos = None, nova_coleta(), None
@@ -862,7 +944,7 @@ def responder(mensagens, origem=None, usuario=None):
             texto, fonte, coleta = saida['texto'], nome, saida['coleta']
             break
     if texto is None:
-        texto = responder_sem_ia(pergunta, origem, resumos, usuario)
+        texto = responder_sem_ia(pergunta, origem, resumos, usuario, coleta)
 
     return {
         'resposta': texto,
@@ -870,4 +952,5 @@ def responder(mensagens, origem=None, usuario=None):
         'fontes': _sem_repetir(([] if coleta.get('sem_pre_busca') else antes['fontes']) + coleta['fontes']),
         'produtos': produtos_para_mostrar(termo, origem, resumos),
         'lojas': _juntar_lojas(lojas_das_notas(termo, origem, resumos), antes['lojas'], coleta['lojas']),
+        'lista_criada': coleta.get('lista_criada'),
     }
