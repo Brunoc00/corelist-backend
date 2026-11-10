@@ -93,6 +93,7 @@ FOTO_DO_TIPO = {
     'tomate': 'Tomato je.jpg',
     'melancia': 'Watermelon cross BNC.jpg',
     'cenoura': 'Vegetable-Carrot-Bundle-wStalks.jpg',
+    'ovo': 'Egg colours.jpg',  # a página mostra um diagrama do ovo
 }
 
 
