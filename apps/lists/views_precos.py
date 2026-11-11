@@ -48,7 +48,7 @@ class PrecosBuscaView(APIView):
                 'dias': dias,
                 'raio_km': raio_km,
                 'tipo': tipo,
-                'produtos': opcoes_do_tipo(tipo, dias, origem=origem, raio_km=raio_km, usuario=request.user),
+                'produtos': opcoes_do_tipo(tipo, dias, origem=origem, raio_km=raio_km),
             })
         return Response({
             'dias': dias,
@@ -61,7 +61,7 @@ class PrecosTiposView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response({'tipos': tipos_com_preco(request.query_params.get('q', ''), usuario=request.user)})
+        return Response({'tipos': tipos_com_preco(request.query_params.get('q', ''))})
 
 
 class PrecosProdutoView(APIView):
